@@ -145,6 +145,10 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub adjust_page_height: Option<bool>,
 
+    /// Whether to adjust the page width to the content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adjust_page_width: Option<bool>,
+
     /// Top page margin (in MEI units).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_margin_top: Option<u32>,
@@ -376,6 +380,13 @@ impl OptionsBuilder {
     #[must_use]
     pub fn adjust_page_height(mut self, adjust: bool) -> Self {
         self.options.adjust_page_height = Some(adjust);
+        self
+    }
+
+    /// Sets whether to adjust the page width to the content.
+    #[must_use]
+    pub fn adjust_page_width(mut self, adjust: bool) -> Self {
+        self.options.adjust_page_width = Some(adjust);
         self
     }
 
@@ -681,6 +692,12 @@ mod tests {
     }
 
     #[test]
+    fn test_options_builder_adjust_page_width() {
+        let options = Options::builder().adjust_page_width(true).build();
+        assert_eq!(options.adjust_page_width, Some(true));
+    }
+
+    #[test]
     fn test_options_builder_font() {
         let options = Options::builder().font("Bravura").build();
         assert_eq!(options.font, Some("Bravura".to_string()));
@@ -709,6 +726,7 @@ mod tests {
             .page_width(2100)
             .page_height(2970)
             .adjust_page_height(true)
+            .adjust_page_width(true)
             .font("Leipzig")
             .breaks(BreakMode::Auto)
             .build();
@@ -717,6 +735,7 @@ mod tests {
         assert_eq!(options.page_width, Some(2100));
         assert_eq!(options.page_height, Some(2970));
         assert_eq!(options.adjust_page_height, Some(true));
+        assert_eq!(options.adjust_page_width, Some(true));
         assert_eq!(options.font, Some("Leipzig".to_string()));
         assert_eq!(options.breaks, Some(BreakMode::Auto));
     }
@@ -727,6 +746,16 @@ mod tests {
         let json = options.to_json().unwrap();
         assert!(json.contains("\"scale\":80"));
         assert!(json.contains("\"pageWidth\":2100"));
+    }
+
+    #[test]
+    fn test_options_adjust_page_width_json() {
+        let options = Options::builder().adjust_page_width(true).build();
+        let json = options.to_json().unwrap();
+        assert!(json.contains("\"adjustPageWidth\":true"));
+
+        let options = Options::from_json(r#"{"adjustPageWidth":true}"#).unwrap();
+        assert_eq!(options.adjust_page_width, Some(true));
     }
 
     #[test]

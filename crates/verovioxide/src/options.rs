@@ -203,6 +203,10 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_measure_width: Option<u32>,
 
+    /// How frequently to place measure numbers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mnum_interval: Option<u32>,
+
     /// Header display mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header: Option<HeaderMode>,
@@ -503,6 +507,13 @@ impl OptionsBuilder {
     #[must_use]
     pub fn min_measure_width(mut self, width: u32) -> Self {
         self.options.min_measure_width = Some(width);
+        self
+    }
+
+    /// Sets how frequently to place measure numbers.
+    #[must_use]
+    pub fn mnum_interval(mut self, interval: u32) -> Self {
+        self.options.mnum_interval = Some(interval);
         self
     }
 
@@ -1223,6 +1234,13 @@ mod tests {
     }
 
     #[test]
+    fn test_options_builder_mnum_interval() {
+        let options = Options::builder().mnum_interval(1).build();
+        assert_eq!(options.mnum_interval, Some(1));
+        assert!(options.to_json().unwrap().contains("\"mnumInterval\":1"));
+    }
+
+    #[test]
     fn test_options_builder_input_from() {
         let options = Options::builder().input_from("musicxml").build();
         assert_eq!(options.input_from, Some("musicxml".to_string()));
@@ -1312,6 +1330,7 @@ mod tests {
             .condense_tempo_pages(false)
             .even_note_spacing(true)
             .min_measure_width(150)
+            .mnum_interval(1)
             .header(HeaderMode::Auto)
             .footer(FooterMode::Always)
             .svg_xml_declaration(true)
@@ -1349,6 +1368,7 @@ mod tests {
         assert!(json.contains("condenseFirstPage"));
         assert!(json.contains("evenNoteSpacing"));
         assert!(json.contains("minMeasureWidth"));
+        assert!(json.contains("mnumInterval"));
         assert!(json.contains("svgXmlDeclaration"));
         assert!(json.contains("svgBoundingBoxes"));
         assert!(json.contains("svgViewBox"));

@@ -23,6 +23,10 @@ const SIMPLE_MEI: &str = include_str!("../../../test-fixtures/mei/simple.mei");
 /// Simple ABC notation file with "Twinkle Twinkle Little Star".
 const SIMPLE_ABC: &str = include_str!("../../../test-fixtures/abc/simple.abc");
 
+const SIMPLE_HUMDRUM_C: &str = "**kern\n4c\n==\n*-\n";
+const SIMPLE_HUMDRUM_D: &str = "**kern\n4d\n==\n*-\n";
+const SIMPLE_HUMDRUM_E: &str = "**kern\n4e\n==\n*-\n";
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -798,6 +802,59 @@ fn test_render_humdrum() {
     let humdrum: String = voxide.render(Humdrum).expect("Failed to render Humdrum");
     // Humdrum format typically has kern data
     assert!(!humdrum.is_empty());
+}
+
+/// Live toolkit instances must retain ownership of their own Humdrum buffers.
+#[test]
+#[serial]
+fn test_live_toolkits_keep_distinct_humdrum_buffers() {
+    let mut first = Toolkit::new().expect("Failed to create first toolkit");
+    let mut second = Toolkit::new().expect("Failed to create second toolkit");
+    first
+        .set_input_from("humdrum")
+        .expect("Failed to select first Humdrum input");
+    second
+        .set_input_from("humdrum")
+        .expect("Failed to select second Humdrum input");
+
+    first
+        .load_data(SIMPLE_HUMDRUM_C)
+        .expect("Failed to load first Humdrum score");
+    let first_snapshot = first
+        .get_humdrum()
+        .expect("First toolkit lost its initial Humdrum buffer");
+
+    second
+        .load_data(SIMPLE_HUMDRUM_D)
+        .expect("Failed to load second Humdrum score");
+    let second_snapshot = second
+        .get_humdrum()
+        .expect("Second toolkit lost its initial Humdrum buffer");
+
+    assert_eq!(
+        first.get_humdrum().unwrap(),
+        first_snapshot,
+        "loading the second toolkit replaced the first toolkit's buffer"
+    );
+    assert_eq!(second.get_humdrum().unwrap(), second_snapshot);
+    assert_ne!(first_snapshot, second_snapshot);
+
+    first
+        .load_data(SIMPLE_HUMDRUM_E)
+        .expect("Failed to replace first Humdrum score");
+    let replacement_snapshot = first
+        .get_humdrum()
+        .expect("First toolkit lost its replacement Humdrum buffer");
+
+    assert_eq!(
+        second.get_humdrum().unwrap(),
+        second_snapshot,
+        "reloading the first toolkit replaced the second toolkit's buffer"
+    );
+    assert_ne!(replacement_snapshot, first_snapshot);
+
+    drop(second);
+    assert_eq!(first.get_humdrum().unwrap(), replacement_snapshot);
 }
 
 /// Test render_to() with format inference from .svg extension.

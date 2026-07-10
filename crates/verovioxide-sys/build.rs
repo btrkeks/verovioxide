@@ -24,7 +24,8 @@
 //! To avoid recompiling Verovio (~6 minutes) on every Rust code change, this script
 //! implements smart caching:
 //!
-//! - The compiled library is cached at `target/verovio-cache/libverovio.a`
+//! - The compiled library is cached under a build-input fingerprint in
+//!   `target/verovio-cache/`
 //! - Subsequent builds link to the cached library instead of recompiling
 //! - Use `cargo build --features force-rebuild` to force a fresh compilation
 //!
@@ -40,6 +41,10 @@ use std::path::PathBuf;
 /// Verovio version to download from GitHub.
 /// This must match the version in the project Makefile (VEROVIO_VERSION).
 const VEROVIO_VERSION: &str = "5.7.0";
+
+/// Published archives for the pinned release predate the instance-owned
+/// Humdrum buffer fix applied by the bundled source path below.
+const PREBUILT_HAS_HUMDRUM_OWNERSHIP_FIX: bool = false;
 
 /// Expected SHA256 hash of the release tarball.
 /// This ensures integrity of downloaded sources and guards against supply chain attacks.
@@ -279,12 +284,28 @@ fn get_cache_dir() -> PathBuf {
 
 /// Returns the path to the cached static library.
 fn get_cached_library_path() -> PathBuf {
-    let cache_dir = get_cache_dir();
+    let cache_dir = get_cached_library_dir();
     if cfg!(target_os = "windows") && cfg!(target_env = "msvc") {
         cache_dir.join("verovio.lib")
     } else {
         cache_dir.join("libverovio.a")
     }
+}
+
+/// Returns the content-addressed directory for the bundled native library.
+///
+/// The build script contains Clef's source overlay for the pinned Verovio
+/// release, so hashing it prevents an archive compiled with an older overlay
+/// from bypassing a later source fix. The target triple prevents incompatible
+/// archives from sharing one cache entry.
+fn get_cached_library_dir() -> PathBuf {
+    let mut hasher = Sha256::new();
+    hasher.update(VEROVIO_VERSION.as_bytes());
+    hasher.update(include_bytes!("build.rs"));
+    let fingerprint = format!("{:x}", hasher.finalize());
+    let target = std::env::var("TARGET").unwrap_or_else(|_| "unknown-target".to_owned());
+
+    get_cache_dir().join(format!("bundled-{target}-{}", &fingerprint[..16]))
 }
 
 /// Returns the path to the cached Verovio source directory.
@@ -340,7 +361,7 @@ fn emit_link_directives(search_path: &std::path::Path) {
 
 /// Copies the compiled library to the cache directory.
 fn cache_compiled_library(out_dir: &std::path::Path) {
-    let cache_dir = get_cache_dir();
+    let cache_dir = get_cached_library_dir();
 
     // Create cache directory if it doesn't exist
     if let Err(e) = std::fs::create_dir_all(&cache_dir) {
@@ -375,6 +396,83 @@ fn cache_compiled_library(out_dir: &std::path::Path) {
             source.display()
         );
     }
+}
+
+struct PatchedVerovioSources {
+    include_root: PathBuf,
+    include_vrv: PathBuf,
+    toolkit_cpp: PathBuf,
+}
+
+/// Materializes the ownership fix for Verovio 5.7.0 without mutating a local
+/// source checkout or the verified downloaded source cache.
+///
+/// Upstream declares `Toolkit::m_humdrumBuffer` as one process-global pointer,
+/// even though each Toolkit constructor, Humdrum load, and destructor treats it
+/// as instance-owned. Independent toolkits therefore replace and free each
+/// other's buffers. Every translation unit must see the corrected class layout,
+/// so the patched header is placed before upstream include directories and the
+/// patched implementation replaces only `src/toolkit.cpp` in the source list.
+fn prepare_patched_verovio_sources(
+    verovio_dir: &std::path::Path,
+    out_dir: &std::path::Path,
+) -> Result<PatchedVerovioSources, String> {
+    let patch_root = out_dir.join("verovio-patched-sources");
+    let include_root = patch_root.join("include");
+    let include_vrv = include_root.join("vrv");
+    let source_root = patch_root.join("src");
+    std::fs::create_dir_all(&include_vrv)
+        .and_then(|()| std::fs::create_dir_all(&source_root))
+        .map_err(|error| format!("failed to create patched Verovio source tree: {error}"))?;
+
+    let upstream_header = verovio_dir.join("include/vrv/toolkit.h");
+    let header = std::fs::read_to_string(&upstream_header)
+        .map_err(|error| format!("failed to read {}: {error}", upstream_header.display()))?;
+    let header = replace_required_once(
+        &header,
+        "    //----------------//\n    // Static members //\n    //----------------//\n\n    static char *m_humdrumBuffer;",
+        "    /** Humdrum data owned by this toolkit instance. */\n    char *m_humdrumBuffer;",
+        &upstream_header,
+    )?;
+    let patched_header = include_vrv.join("toolkit.h");
+    std::fs::write(&patched_header, header)
+        .map_err(|error| format!("failed to write {}: {error}", patched_header.display()))?;
+
+    let upstream_cpp = verovio_dir.join("src/toolkit.cpp");
+    let cpp = std::fs::read_to_string(&upstream_cpp)
+        .map_err(|error| format!("failed to read {}: {error}", upstream_cpp.display()))?;
+    let cpp = replace_required_once(
+        &cpp,
+        "char *Toolkit::m_humdrumBuffer = NULL;\n\n",
+        "",
+        &upstream_cpp,
+    )?;
+    let toolkit_cpp = source_root.join("toolkit.cpp");
+    std::fs::write(&toolkit_cpp, cpp)
+        .map_err(|error| format!("failed to write {}: {error}", toolkit_cpp.display()))?;
+
+    Ok(PatchedVerovioSources {
+        include_root,
+        include_vrv,
+        toolkit_cpp,
+    })
+}
+
+fn replace_required_once(
+    source: &str,
+    expected: &str,
+    replacement: &str,
+    path: &std::path::Path,
+) -> Result<String, String> {
+    let matches = source.matches(expected).count();
+    if matches != 1 {
+        return Err(format!(
+            "Verovio ownership patch expected one match in {}, found {matches}; review the pinned source before updating the patch",
+            path.display()
+        ));
+    }
+
+    Ok(source.replacen(expected, replacement, 1))
 }
 
 /// Result of SHA256 verification.
@@ -580,8 +678,21 @@ fn main() {
     let prebuilt_enabled = std::env::var("CARGO_FEATURE_PREBUILT").is_ok();
     let bundled_enabled = std::env::var("CARGO_FEATURE_BUNDLED").is_ok();
 
-    // Handle prebuilt feature - download pre-compiled library
-    if prebuilt_enabled {
+    // A prebuilt-only build must fail closed while the published archive lacks
+    // the ownership patch. If bundled is also enabled, ignore prebuilt and
+    // continue through the patched source path.
+    if prebuilt_enabled && !PREBUILT_HAS_HUMDRUM_OWNERSHIP_FIX {
+        if !bundled_enabled {
+            panic!(
+                "Verovio {VEROVIO_VERSION} prebuilt archives do not contain the required instance-owned Humdrum buffer fix; enable the bundled feature"
+            );
+        }
+        println!(
+            "cargo:warning=Verovio {VEROVIO_VERSION} prebuilt archive lacks the Humdrum ownership fix; compiling the patched bundled source"
+        );
+    }
+    // Handle a future ownership-safe prebuilt archive.
+    else if prebuilt_enabled {
         match download_prebuilt() {
             Ok(lib_path) => {
                 let lib_dir = lib_path.parent().expect("library path has no parent");
@@ -616,7 +727,7 @@ fn main() {
 
     // Check if we can use the cached library
     if should_use_cache() {
-        let cache_dir = get_cache_dir();
+        let cache_dir = get_cached_library_dir();
         emit_link_directives(&cache_dir);
         return;
     }
@@ -637,6 +748,8 @@ fn main() {
             );
         }
     };
+    let patched_sources = prepare_patched_verovio_sources(&verovio_dir, &out_dir)
+        .unwrap_or_else(|error| panic!("failed to apply Verovio ownership patch: {error}"));
 
     // Set up rerun-if-changed for source files now that we have the path
     println!(
@@ -691,6 +804,8 @@ fn main() {
         "libmei/addons",
     ];
 
+    build.include(&patched_sources.include_vrv);
+    build.include(&patched_sources.include_root);
     for dir in &include_dirs {
         build.include(verovio_dir.join(dir));
     }
@@ -742,7 +857,11 @@ fn main() {
         if path.extension().is_some_and(|ext| ext == "cpp")
             && path.file_name().is_some_and(|name| name != "main.cpp")
         {
-            sources.push(path);
+            if path.file_name().is_some_and(|name| name == "toolkit.cpp") {
+                sources.push(patched_sources.toolkit_cpp.clone());
+            } else {
+                sources.push(path);
+            }
         }
     }
 

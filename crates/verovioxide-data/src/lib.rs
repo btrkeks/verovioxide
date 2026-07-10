@@ -39,7 +39,7 @@
 
 use include_dir::{Dir, include_dir};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use thiserror::Error;
 
@@ -137,6 +137,105 @@ pub fn extract_resources() -> Result<TempDir, DataError> {
     let temp_dir = TempDir::new().map_err(DataError::TempDirCreation)?;
     extract_dir_contents(&VEROVIO_DATA, temp_dir.path())?;
     Ok(temp_dir)
+}
+
+/// Extracts all embedded resources into a stable cache directory, reusing a
+/// previous extraction when one exists.
+///
+/// The resources are placed in `<cache_root>/verovio-resources-<fingerprint>`,
+/// where the fingerprint is derived from the embedded data, so a rebuild with
+/// different bundled resources gets a fresh cache entry. Repeated calls —
+/// including from concurrent processes — return the same directory without
+/// re-extracting.
+///
+/// Prefer this over [`extract_resources`] for long-lived applications: the
+/// `TempDir` returned by [`extract_resources`] is only cleaned up on `Drop`,
+/// so a killed process (SIGKILL, test-harness teardown, service restart)
+/// leaks the extracted directory. The cached directory is instead reused
+/// across process lifetimes.
+///
+/// Extraction is atomic: data is written to a staging directory inside
+/// `cache_root` and renamed into place, so a crashed extraction never leaves
+/// a partial cache entry, and concurrent extractions race safely.
+///
+/// # Errors
+///
+/// Returns a [`DataError`] if:
+/// - The cache root or staging directory cannot be created
+/// - A file cannot be written during extraction
+/// - The staging directory cannot be renamed into place
+///
+/// # Example
+///
+/// ```no_run
+/// use verovioxide_data::extract_resources_cached;
+///
+/// let cache_root = std::env::temp_dir().join("my-app-cache");
+/// let resources = extract_resources_cached(&cache_root).expect("Failed to extract resources");
+/// assert!(resources.join("Bravura.xml").exists());
+/// ```
+pub fn extract_resources_cached(cache_root: &Path) -> Result<PathBuf, DataError> {
+    let target = cache_root.join(format!(
+        "verovio-resources-{:016x}",
+        embedded_data_fingerprint()
+    ));
+    if target.is_dir() {
+        return Ok(target);
+    }
+
+    std::fs::create_dir_all(cache_root).map_err(|source| DataError::DirectoryCreation {
+        path: cache_root.display().to_string(),
+        source,
+    })?;
+
+    let staging = tempfile::Builder::new()
+        .prefix(".verovio-extract-")
+        .tempdir_in(cache_root)
+        .map_err(DataError::TempDirCreation)?;
+    extract_dir_contents(&VEROVIO_DATA, staging.path())?;
+
+    // Cleanup responsibility transfers to us: on the success path the staging
+    // directory is renamed away, and on failure we remove it explicitly.
+    let staging_path = staging.keep();
+    match std::fs::rename(&staging_path, &target) {
+        Ok(()) => Ok(target),
+        Err(_) if target.is_dir() => {
+            // A concurrent extraction won the race; use its result.
+            let _ = std::fs::remove_dir_all(&staging_path);
+            Ok(target)
+        }
+        Err(source) => {
+            let _ = std::fs::remove_dir_all(&staging_path);
+            Err(DataError::DirectoryCreation {
+                path: target.display().to_string(),
+                source,
+            })
+        }
+    }
+}
+
+/// Fingerprints the embedded data so cache entries are keyed by content.
+///
+/// `DefaultHasher::new()` is deterministic across runs of the same build but
+/// not guaranteed stable across Rust releases; a toolchain upgrade at worst
+/// produces one extra cache entry.
+fn embedded_data_fingerprint() -> u64 {
+    use std::hash::Hasher;
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hash_dir_contents(&VEROVIO_DATA, &mut hasher);
+    hasher.finish()
+}
+
+/// Recursively hashes file paths and contents in embedded iteration order.
+fn hash_dir_contents(dir: &Dir<'_>, hasher: &mut impl std::hash::Hasher) {
+    for file in dir.files() {
+        hasher.write(file.path().to_string_lossy().as_bytes());
+        hasher.write(file.contents());
+    }
+    for subdir in dir.dirs() {
+        hash_dir_contents(subdir, hasher);
+    }
 }
 
 /// Recursively extracts directory contents to the target path.
@@ -298,6 +397,87 @@ mod tests {
         let text_path = temp_dir.path().join("text");
         assert!(text_path.exists(), "text/ directory should be extracted");
         assert!(text_path.is_dir(), "text should be a directory");
+    }
+
+    #[test]
+    fn test_extract_resources_cached_creates_files() {
+        let cache_root = TempDir::new().expect("Failed to create cache root");
+        let target =
+            extract_resources_cached(cache_root.path()).expect("Failed to extract resources");
+        assert!(
+            target.starts_with(cache_root.path()),
+            "Target should live inside the cache root"
+        );
+        assert!(
+            target.join("Bravura.xml").exists(),
+            "Bravura.xml should be extracted"
+        );
+        assert!(
+            target.join("text").is_dir(),
+            "text/ directory should be extracted"
+        );
+    }
+
+    #[test]
+    fn test_extract_resources_cached_reuses_existing_extraction() {
+        let cache_root = TempDir::new().expect("Failed to create cache root");
+        let first = extract_resources_cached(cache_root.path()).expect("First extraction failed");
+
+        let sentinel = first.join(".reuse-sentinel");
+        std::fs::write(&sentinel, b"x").expect("Failed to write sentinel");
+
+        let second = extract_resources_cached(cache_root.path()).expect("Second extraction failed");
+        assert_eq!(first, second, "Both calls should return the same directory");
+        assert!(
+            sentinel.exists(),
+            "Second call should reuse the extraction, not redo it"
+        );
+    }
+
+    #[test]
+    fn test_extract_resources_cached_leaves_no_staging_dirs() {
+        let cache_root = TempDir::new().expect("Failed to create cache root");
+        extract_resources_cached(cache_root.path()).expect("Failed to extract resources");
+
+        let entries: Vec<_> = std::fs::read_dir(cache_root.path())
+            .expect("Failed to read cache root")
+            .map(|entry| entry.expect("Failed to read entry").file_name())
+            .collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "Only the target directory should remain, got: {:?}",
+            entries
+        );
+    }
+
+    #[test]
+    fn test_extract_resources_cached_creates_missing_cache_root() {
+        let base = TempDir::new().expect("Failed to create base dir");
+        let cache_root = base.path().join("nested").join("cache");
+        let target = extract_resources_cached(&cache_root).expect("Failed to extract resources");
+        assert!(target.join("Bravura.xml").exists());
+    }
+
+    #[test]
+    fn test_extract_resources_cached_matches_embedded_content() {
+        let cache_root = TempDir::new().expect("Failed to create cache root");
+        let target =
+            extract_resources_cached(cache_root.path()).expect("Failed to extract resources");
+
+        let extracted = std::fs::read_to_string(target.join("Bravura.xml"))
+            .expect("Failed to read extracted file");
+        let embedded = resource_dir()
+            .get_file("Bravura.xml")
+            .expect("Bravura.xml should exist")
+            .contents_utf8()
+            .expect("Should be valid UTF-8");
+        assert_eq!(extracted, embedded);
+    }
+
+    #[test]
+    fn test_embedded_data_fingerprint_is_stable_within_run() {
+        assert_eq!(embedded_data_fingerprint(), embedded_data_fingerprint());
     }
 
     #[test]

@@ -256,6 +256,40 @@ impl Toolkit {
         })
     }
 
+    /// Creates a new toolkit using bundled resources extracted to a stable
+    /// cache directory.
+    ///
+    /// Unlike [`new`](Self::new), which extracts the bundled resources to a
+    /// fresh temporary directory for every toolkit (and leaks that directory
+    /// if the process dies before `Drop` runs), this extracts once into
+    /// `cache_root` via [`verovioxide_data::extract_resources_cached`] and
+    /// reuses the extraction across toolkits, processes, and restarts.
+    ///
+    /// # Arguments
+    ///
+    /// * `cache_root` - Directory that holds the versioned resource cache
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Resource extraction fails
+    /// - Toolkit initialization fails
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use verovioxide::Toolkit;
+    ///
+    /// let cache_root = std::env::temp_dir().join("my-app-cache");
+    /// let toolkit = Toolkit::with_cached_resources(&cache_root)
+    ///     .expect("Failed to create toolkit");
+    /// ```
+    #[cfg(feature = "bundled-data")]
+    pub fn with_cached_resources(cache_root: &Path) -> Result<Self> {
+        let resources = verovioxide_data::extract_resources_cached(cache_root)?;
+        Self::with_resource_path(&resources)
+    }
+
     /// Creates a new toolkit with an explicit resource path.
     ///
     /// Use this when you have your own Verovio resources directory and don't want
@@ -3289,6 +3323,21 @@ mod tests {
         let path = toolkit.get_resource_path();
         // Without resources, path may be empty
         let _ = path;
+    }
+
+    #[test]
+    #[cfg(feature = "bundled-data")]
+    fn test_toolkit_with_cached_resources_creates_and_reuses_cache() {
+        let cache_root = tempfile::TempDir::new().expect("Failed to create cache root");
+
+        let toolkit =
+            Toolkit::with_cached_resources(cache_root.path()).expect("Failed to create toolkit");
+        assert!(!toolkit.get_resource_path().is_empty());
+
+        // A second toolkit reuses the same extracted directory.
+        let second = Toolkit::with_cached_resources(cache_root.path())
+            .expect("Failed to create second toolkit");
+        assert_eq!(toolkit.get_resource_path(), second.get_resource_path());
     }
 
     #[test]

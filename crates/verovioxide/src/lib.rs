@@ -283,8 +283,8 @@ pub use render::{Png, PngAllPages, PngOptions, PngPage, PngPages};
 // Re-export data crate types when bundled-data feature is enabled
 #[cfg(feature = "bundled-data")]
 pub use verovioxide_data::{
-    DataError, available_fonts, default_font, extract_resources, has_bravura, has_gootville,
-    has_leipzig, has_leland, has_petaluma, resource_dir,
+    DataError, available_fonts, default_font, extract_resources, extract_resources_cached,
+    has_bravura, has_gootville, has_leipzig, has_leland, has_petaluma, resource_dir,
 };
 
 #[cfg(test)]

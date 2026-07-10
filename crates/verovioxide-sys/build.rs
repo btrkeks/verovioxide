@@ -307,10 +307,9 @@ fn should_use_cache() -> bool {
 
     let cached_lib = get_cached_library_path();
     if cached_lib.exists() {
-        println!(
-            "cargo:warning=Using cached Verovio library from {}",
-            cached_lib.display()
-        );
+        // The cache hit is the expected steady state; logging it as a
+        // cargo:warning would put noise in every downstream build.
+        println!("Using cached Verovio library from {}", cached_lib.display());
         true
     } else {
         println!(

@@ -183,6 +183,10 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub breaks: Option<BreakMode>,
 
+    /// Maximum number of systems placed on one page (`0` keeps Verovio's default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_max_per_page: Option<u32>,
+
     /// Condense mode for dense layouts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condense: Option<CondenseMode>,
@@ -475,6 +479,13 @@ impl OptionsBuilder {
         self
     }
 
+    /// Sets the maximum number of systems placed on one page.
+    #[must_use]
+    pub fn system_max_per_page(mut self, maximum: u32) -> Self {
+        self.options.system_max_per_page = Some(maximum);
+        self
+    }
+
     /// Sets the condense mode for dense layouts.
     #[must_use]
     pub fn condense(mut self, mode: CondenseMode) -> Self {
@@ -718,6 +729,18 @@ mod tests {
     fn test_options_builder_breaks() {
         let options = Options::builder().breaks(BreakMode::Encoded).build();
         assert_eq!(options.breaks, Some(BreakMode::Encoded));
+    }
+
+    #[test]
+    fn test_options_builder_system_max_per_page() {
+        let options = Options::builder().system_max_per_page(1).build();
+        assert_eq!(options.system_max_per_page, Some(1));
+        assert!(
+            options
+                .to_json()
+                .unwrap()
+                .contains(r#""systemMaxPerPage":1"#)
+        );
     }
 
     #[test]

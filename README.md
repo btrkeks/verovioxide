@@ -510,7 +510,7 @@ cargo run --example render_all_pages -- \
 
 ```
 Creating Verovio toolkit with bundled resources...
-Verovio version: 5.7.0
+Verovio version: 6.2.1
 Setting page dimensions: width=2100, height=2970 (A4-like)
 Loading file: examples/Goldberg-Variationen-1-and-2.musicxml (format auto-detected)
 [Warning] MusicXML import: Dangling ending tag skipped
@@ -538,7 +538,7 @@ Done! Rendered 3 pages.
 
 ### Verovio Version
 
-This release uses Verovio 5.7.0.
+This release uses Verovio 6.2.1.
 
 ### Logging
 

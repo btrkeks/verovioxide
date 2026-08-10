@@ -60,7 +60,7 @@ VEROVIO_SOURCE_DIR=/path/to/verovio cargo build
 
 ## Verovio Version
 
-This crate bundles Verovio 5.7.0.
+This crate bundles Verovio 6.2.1.
 
 ## Related Crates
 

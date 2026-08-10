@@ -40,7 +40,7 @@ use std::path::PathBuf;
 
 /// Verovio version to download from GitHub.
 /// This must match the version in the project Makefile (VEROVIO_VERSION).
-const VEROVIO_VERSION: &str = "5.7.0";
+const VEROVIO_VERSION: &str = "6.2.1";
 
 /// Published archives for the pinned release predate the instance-owned
 /// Humdrum buffer fix applied by the bundled source path below.
@@ -51,10 +51,10 @@ const PREBUILT_HAS_HUMDRUM_OWNERSHIP_FIX: bool = false;
 ///
 /// To compute/verify this hash, run:
 /// ```sh
-/// curl -sL https://github.com/rism-digital/verovio/archive/refs/tags/version-5.7.0.tar.gz | shasum -a 256
+/// curl -sL https://github.com/rism-digital/verovio/archive/refs/tags/version-6.2.1.tar.gz | shasum -a 256
 /// ```
 const VEROVIO_TARBALL_SHA256: &str =
-    "bf7483504ddbf2d7ff59ae53b547e6347f89f82583559bf264d97b3624279d5e";
+    "fa0ccdad12f2d56b7e76537ad7af5355a9e6861c17f793e028741b1e2800bbb0";
 
 /// GitHub release tarball URL for source code.
 fn get_download_url() -> String {
@@ -404,8 +404,8 @@ struct PatchedVerovioSources {
     toolkit_cpp: PathBuf,
 }
 
-/// Materializes the ownership fix for Verovio 5.7.0 without mutating a local
-/// source checkout or the verified downloaded source cache.
+/// Materializes the ownership fix for the pinned Verovio release without
+/// mutating a local source checkout or the verified downloaded source cache.
 ///
 /// Upstream declares `Toolkit::m_humdrumBuffer` as one process-global pointer,
 /// even though each Toolkit constructor, Humdrum load, and destructor treats it
@@ -796,6 +796,7 @@ fn main() {
         "include/vrv",
         "include/crc",
         "include/midi",
+        "include/tuning-library",
         "include/hum",
         "include/json",
         "include/pugi",

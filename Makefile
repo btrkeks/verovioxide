@@ -18,7 +18,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 RUST_VERSION := $(shell rustc --version 2>/dev/null || echo "unknown")
-VEROVIO_VERSION := 5.7.0
+VEROVIO_VERSION := 6.2.1
 
 # List of binaries to build and install
 BINARIES := tbd

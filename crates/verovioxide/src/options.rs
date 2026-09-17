@@ -187,6 +187,10 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_max_per_page: Option<u32>,
 
+    /// Whether grace-note groups align to preceding notes across all staves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grace_right_align: Option<bool>,
+
     /// Condense mode for dense layouts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condense: Option<CondenseMode>,
@@ -486,6 +490,13 @@ impl OptionsBuilder {
         self
     }
 
+    /// Sets whether grace-note groups align to preceding notes across all staves.
+    #[must_use]
+    pub fn grace_right_align(mut self, align: bool) -> Self {
+        self.options.grace_right_align = Some(align);
+        self
+    }
+
     /// Sets the condense mode for dense layouts.
     #[must_use]
     pub fn condense(mut self, mode: CondenseMode) -> Self {
@@ -741,6 +752,13 @@ mod tests {
                 .unwrap()
                 .contains(r#""systemMaxPerPage":1"#)
         );
+    }
+
+    #[test]
+    fn test_options_builder_grace_right_align() {
+        let options = Options::builder().grace_right_align(true).build();
+        assert_eq!(options.grace_right_align, Some(true));
+        assert!(options.to_json().unwrap().contains(r#""graceRightAlign":true"#));
     }
 
     #[test]

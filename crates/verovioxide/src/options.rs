@@ -191,6 +191,10 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grace_right_align: Option<bool>,
 
+    /// Whether systems spread to fill the page height.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub justify_vertically: Option<bool>,
+
     /// Condense mode for dense layouts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condense: Option<CondenseMode>,
@@ -497,6 +501,13 @@ impl OptionsBuilder {
         self
     }
 
+    /// Sets whether systems spread to fill the page height.
+    #[must_use]
+    pub fn justify_vertically(mut self, justify: bool) -> Self {
+        self.options.justify_vertically = Some(justify);
+        self
+    }
+
     /// Sets the condense mode for dense layouts.
     #[must_use]
     pub fn condense(mut self, mode: CondenseMode) -> Self {
@@ -759,6 +770,13 @@ mod tests {
         let options = Options::builder().grace_right_align(true).build();
         assert_eq!(options.grace_right_align, Some(true));
         assert!(options.to_json().unwrap().contains(r#""graceRightAlign":true"#));
+    }
+
+    #[test]
+    fn test_options_builder_justify_vertically() {
+        let options = Options::builder().justify_vertically(true).build();
+        assert_eq!(options.justify_vertically, Some(true));
+        assert!(options.to_json().unwrap().contains(r#""justifyVertically":true"#));
     }
 
     #[test]

@@ -1308,4 +1308,6 @@
   <g c="EE93" x="0.0" y="-260.0" w="325.0" h="532.0" h-a-x="325" n="mensuralProportion8" />
   <g c="EE94" x="0.0" y="-273.0" w="323.0" h="537.0" h-a-x="324" n="mensuralProportion9" />
   <g c="E4D7" x="0.0" y="0.0" w="51.0" h="533.0" h-a-x="51" n="caesuraSingleStroke" />
+  <g c="ED20" x="0.0" y="275.0" w="280.0" h="90.0" h-a-x="280" n="fingeringSubstitutionAbove" />
+  <g c="ED21" x="0.0" y="-115.0" w="280.0" h="90.0" h-a-x="280" n="fingeringSubstitutionBelow" />
 </bounding-boxes>

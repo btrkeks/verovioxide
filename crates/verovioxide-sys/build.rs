@@ -41,6 +41,7 @@ use std::path::PathBuf;
 /// Verovio version to download from GitHub.
 /// This must match the version in the project Makefile (VEROVIO_VERSION).
 const VEROVIO_VERSION: &str = "6.2.1";
+const LOCAL_FINGERING_FORK_REVISION: &str = "5a02114b5abf25dc938f634a0018a20f8513479b";
 
 /// Published archives for the pinned release predate the instance-owned
 /// Humdrum buffer fix applied by the bundled source path below.
@@ -302,10 +303,43 @@ fn get_cached_library_dir() -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(VEROVIO_VERSION.as_bytes());
     hasher.update(include_bytes!("build.rs"));
+    if let Ok(source) = std::env::var("VEROVIO_SOURCE_DIR") {
+        let root = PathBuf::from(source);
+        for directory in ["include", "src", "libmei", "tools"] {
+            hash_source_tree(&root, &root.join(directory), &mut hasher);
+        }
+    }
     let fingerprint = format!("{:x}", hasher.finalize());
     let target = std::env::var("TARGET").unwrap_or_else(|_| "unknown-target".to_owned());
 
     get_cache_dir().join(format!("bundled-{target}-{}", &fingerprint[..16]))
+}
+
+fn hash_source_tree(root: &std::path::Path, path: &std::path::Path, hash: &mut Sha256) {
+    let mut entries = std::fs::read_dir(path)
+        .unwrap_or_else(|error| panic!("read local Verovio source {}: {error}", path.display()))
+        .map(|entry| entry.expect("read source entry").path())
+        .collect::<Vec<_>>();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            hash_source_tree(root, &path, hash);
+        } else if path
+            .extension()
+            .is_some_and(|extension| matches!(extension.to_str(), Some("h" | "hpp" | "cpp" | "c")))
+            && path.file_name().is_none_or(|name| name != "git_commit.h")
+        {
+            println!("cargo:rerun-if-changed={}", path.display());
+            hash.update(
+                path.strip_prefix(root)
+                    .expect("source inside root")
+                    .to_string_lossy()
+                    .as_bytes(),
+            );
+            hash.update([0]);
+            hash.update(std::fs::read(&path).expect("read local Verovio source"));
+        }
+    }
 }
 
 /// Returns the path to the cached Verovio source directory.
@@ -428,6 +462,23 @@ fn prepare_patched_verovio_sources(
     let upstream_header = verovio_dir.join("include/vrv/toolkit.h");
     let header = std::fs::read_to_string(&upstream_header)
         .map_err(|error| format!("failed to read {}: {error}", upstream_header.display()))?;
+    if !header.contains("static char *m_humdrumBuffer") {
+        let cpp = verovio_dir.join("src/toolkit.cpp");
+        let contents = std::fs::read_to_string(&cpp).map_err(|error| error.to_string())?;
+        if !header.contains("char *m_humdrumBuffer")
+            || contents.contains("char *Toolkit::m_humdrumBuffer")
+        {
+            return Err(
+                "local Verovio sources have an unrecognized Humdrum buffer ownership contract"
+                    .into(),
+            );
+        }
+        return Ok(PatchedVerovioSources {
+            include_root: verovio_dir.join("include"),
+            include_vrv: verovio_dir.join("include/vrv"),
+            toolkit_cpp: cpp,
+        });
+    }
     let header = replace_required_once(
         &header,
         "    //----------------//\n    // Static members //\n    //----------------//\n\n    static char *m_humdrumBuffer;",
@@ -556,6 +607,17 @@ fn discover_verovio_source() -> Result<PathBuf, String> {
     // Priority 1: VEROVIO_SOURCE_DIR environment variable
     if let Ok(env_path) = std::env::var("VEROVIO_SOURCE_DIR") {
         let path = PathBuf::from(&env_path);
+        let revision = std::process::Command::new("git")
+            .args(["-C", &env_path, "rev-parse", "HEAD"])
+            .output()
+            .map_err(|error| format!("read local Verovio revision: {error}"))?;
+        if !revision.status.success()
+            || String::from_utf8_lossy(&revision.stdout).trim() != LOCAL_FINGERING_FORK_REVISION
+        {
+            return Err(format!(
+                "local fingering build requires Verovio commit {LOCAL_FINGERING_FORK_REVISION}"
+            ));
+        }
         if path.exists() && path.join("src").exists() {
             println!(
                 "cargo:warning=Using Verovio source from VEROVIO_SOURCE_DIR: {}",

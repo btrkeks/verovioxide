@@ -19,48 +19,50 @@ cargo add verovioxide-sys
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `bundled` | Yes | Compile Verovio C++ library from source |
-| `prebuilt` | No | Download pre-built library from GitHub releases (faster) |
+| `bundled` | Yes | Compile the pinned local Verovio fork |
+| `prebuilt` | No | Legacy flag; this local fork still requires `bundled` |
 | `force-rebuild` | No | Force fresh compilation, bypassing cache |
 
-### Faster Builds with Prebuilt Binaries
+## Local source requirement
 
-For faster initial builds, enable the `prebuilt` feature:
+This development fork requires a clean Git checkout of Verovio commit
+`5a02114b5abf25dc938f634a0018a20f8513479b`, based on version 6.2.1. Supply it
+explicitly for every build:
 
-```toml
-[dependencies]
-verovioxide-sys = { version = "0.3", features = ["prebuilt"] }
+```bash
+VEROVIO_SOURCE_DIR=/path/to/verovio-fingering-layer cargo build
 ```
 
-Prebuilt binaries are available for:
+The build rejects a missing path, another revision, or any tracked, staged,
+untracked, or ignored changes. The old ignored `include/vrv/git_commit.h`
+may remain from earlier builds; this build always overrides it with a
+commit header in Cargo's output directory. It does not modify the source
+checkout.
 
-- macOS (x86_64, aarch64)
-- Linux (x86_64, aarch64)
-- Windows (x86_64 MSVC)
+Validation runs before cached libraries can be used. There is no upstream,
+submodule, download, or prebuilt-library fallback. This fork is local-only
+until its source pin is published through a separate approved change.
 
-If prebuilt binaries aren't available for your platform, it automatically falls back to compiling from source.
+## Build caching
 
-## Build Caching
-
-The Verovio C++ library is compiled once and cached at `target/verovio-cache/`. Subsequent builds link to the cached library and complete in seconds.
+The compiled library lives under `target/verovio-cache/`, keyed by the build
+script, source inputs, and target. Subsequent builds use that library only
+after the source checkout passes validation again.
 
 To force a fresh recompilation:
 
 ```bash
-cargo build --features force-rebuild
+VEROVIO_SOURCE_DIR=/path/to/verovio-fingering-layer cargo build --features force-rebuild
 ```
 
-## Corporate/Restricted Networks
+## Verify the source guard
 
-If your network blocks GitHub downloads, provide a local Verovio source:
+These tests use temporary Git repositories and do not compile Verovio:
 
 ```bash
-VEROVIO_SOURCE_DIR=/path/to/verovio cargo build
+rustc --edition 2024 --test crates/verovioxide-sys/build_source.rs -o /tmp/verovio-source-guard-tests
+/tmp/verovio-source-guard-tests
 ```
-
-## Verovio Version
-
-This crate bundles Verovio 6.2.1.
 
 ## Related Crates
 

@@ -16,8 +16,7 @@ build = "build.rs"
 default = ["bundled"]
 # Compile Verovio C++ library from source (slower first build, but works everywhere)
 bundled = []
-# Download pre-built Verovio library from GitHub releases (fast, but limited platforms)
-# Supported: x86_64-apple-darwin, aarch64-apple-darwin, x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc
+# Legacy feature retained for dependency compatibility; requires bundled in this local fork.
 prebuilt = []
 # Force a fresh recompilation of the Verovio C++ library, bypassing the cache.
 # Use with: cargo build --features force-rebuild
@@ -26,9 +25,6 @@ force-rebuild = []
 [build-dependencies]
 cc = "1"
 dunce = "1"
-flate2 = "1"
 sha2 = "0.10"
-tar = "0.4"
-ureq = "3"
 
 [dependencies]

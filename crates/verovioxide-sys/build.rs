@@ -1,23 +1,12 @@
 //! Build script for verovioxide-sys.
 //!
-//! This script compiles the Verovio C++ library from source using the `cc` crate,
-//! or downloads a pre-built library when the `prebuilt` feature is enabled.
+//! This script compiles the pinned local Verovio C++ library using the `cc` crate.
 //!
-//! # Build Modes
+//! # Local build contract
 //!
-//! - **`bundled` feature (default)**: Compiles Verovio from source. Slower first build
-//!   but works on any platform with a C++ compiler.
-//! - **`prebuilt` feature**: Downloads a pre-built static library from GitHub releases.
-//!   Much faster, but only available for supported platforms.
-//!
-//! # Source Discovery (bundled mode)
-//!
-//! The build script looks for Verovio source code in the following order:
-//!
-//! 1. `VEROVIO_SOURCE_DIR` environment variable - for corporate/restricted networks
-//! 2. Local submodule at `../../verovio` - for development workflows
-//! 3. Cached download at `target/verovio-cache/verovio-source/` - for repeat builds
-//! 4. Download from GitHub release - for first-time crates.io users
+//! This fork builds only the pinned local fingering implementation. Set
+//! `VEROVIO_SOURCE_DIR` to its clean Git checkout. Validation runs before
+//! cache lookup. No upstream source or prebuilt binary fallback is available.
 //!
 //! # Smart Caching
 //!
@@ -35,233 +24,12 @@
 //! across clean builds of individual crates while still being cleaned by `cargo clean`.
 
 use sha2::{Digest, Sha256};
-use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Verovio version to download from GitHub.
-/// This must match the version in the project Makefile (VEROVIO_VERSION).
+mod build_source;
+
 const VEROVIO_VERSION: &str = "6.2.1";
 const LOCAL_FINGERING_FORK_REVISION: &str = "5a02114b5abf25dc938f634a0018a20f8513479b";
-
-/// Published archives for the pinned release predate the instance-owned
-/// Humdrum buffer fix applied by the bundled source path below.
-const PREBUILT_HAS_HUMDRUM_OWNERSHIP_FIX: bool = false;
-
-/// Expected SHA256 hash of the release tarball.
-/// This ensures integrity of downloaded sources and guards against supply chain attacks.
-///
-/// To compute/verify this hash, run:
-/// ```sh
-/// curl -sL https://github.com/rism-digital/verovio/archive/refs/tags/version-6.2.1.tar.gz | shasum -a 256
-/// ```
-const VEROVIO_TARBALL_SHA256: &str =
-    "fa0ccdad12f2d56b7e76537ad7af5355a9e6861c17f793e028741b1e2800bbb0";
-
-/// GitHub release tarball URL for source code.
-fn get_download_url() -> String {
-    format!(
-        "https://github.com/rism-digital/verovio/archive/refs/tags/version-{}.tar.gz",
-        VEROVIO_VERSION
-    )
-}
-
-/// verovioxide release version for prebuilt binaries.
-/// This should match the crate version when prebuilt binaries are available.
-const VEROVIOXIDE_VERSION: &str = "0.1.0";
-
-/// Base URL for GitHub releases.
-fn get_release_base_url() -> String {
-    format!(
-        "https://github.com/oxur/verovioxide/releases/download/v{}",
-        VEROVIOXIDE_VERSION
-    )
-}
-
-/// GitHub release URL for prebuilt static libraries.
-fn get_prebuilt_url(target: &str) -> String {
-    let lib_name = get_prebuilt_lib_name(target);
-    format!("{}/{}", get_release_base_url(), lib_name)
-}
-
-/// URL for the hash manifest file.
-fn get_hashes_url() -> String {
-    format!("{}/hashes.json", get_release_base_url())
-}
-
-/// Returns the library filename for a given target.
-fn get_prebuilt_lib_name(target: &str) -> String {
-    if target.contains("windows") && target.contains("msvc") {
-        format!("verovio-{}-{}.lib", VEROVIO_VERSION, target)
-    } else {
-        format!("libverovio-{}-{}.a", VEROVIO_VERSION, target)
-    }
-}
-
-/// Supported targets for prebuilt binaries.
-const SUPPORTED_TARGETS: &[&str] = &[
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-pc-windows-msvc",
-];
-
-/// Downloads the hash manifest and returns the expected hash for a target.
-fn fetch_prebuilt_sha256(target: &str) -> Result<String, String> {
-    let url = get_hashes_url();
-
-    let cache_dir = get_cache_dir();
-    std::fs::create_dir_all(&cache_dir)
-        .map_err(|e| format!("Failed to create cache directory: {}", e))?;
-
-    // Cache the hashes file to avoid re-downloading
-    let hashes_cache_path = cache_dir.join(format!("hashes-v{}.json", VEROVIOXIDE_VERSION));
-
-    let hashes_json = if hashes_cache_path.exists() {
-        std::fs::read_to_string(&hashes_cache_path)
-            .map_err(|e| format!("Failed to read cached hashes: {}", e))?
-    } else {
-        println!("cargo:warning=Downloading hash manifest from: {}", url);
-
-        let response = ureq::get(&url).call().map_err(|e| {
-            format!(
-                "Failed to download hash manifest: {}\n\n\
-                 This likely means prebuilt binaries haven't been released yet for v{}.\n\
-                 Use the 'bundled' feature to compile from source:\n\
-                 cargo build --no-default-features --features bundled",
-                e, VEROVIOXIDE_VERSION
-            )
-        })?;
-
-        if response.status() != 200 {
-            return Err(format!(
-                "HTTP error downloading hash manifest: status {}\n\n\
-                 Prebuilt binaries may not be available for v{}.\n\
-                 Use the 'bundled' feature to compile from source.",
-                response.status(),
-                VEROVIOXIDE_VERSION
-            ));
-        }
-
-        let json = response
-            .into_body()
-            .read_to_string()
-            .map_err(|e| format!("Failed to read hash manifest: {}", e))?;
-
-        // Cache for future builds
-        let _ = std::fs::write(&hashes_cache_path, &json);
-
-        json
-    };
-
-    // Parse the JSON to find our target's hash
-    // Format: {"x86_64-apple-darwin": "abc123...", ...}
-    // Using simple string parsing to avoid adding serde_json as build dependency
-    let search_key = format!("\"{}\"", target);
-    if let Some(key_pos) = hashes_json.find(&search_key) {
-        // Find the colon after the key
-        let after_key = &hashes_json[key_pos + search_key.len()..];
-        if let Some(colon_pos) = after_key.find(':') {
-            let after_colon = &after_key[colon_pos + 1..];
-            // Find the opening quote of the value
-            if let Some(quote_start) = after_colon.find('"') {
-                let value_start = &after_colon[quote_start + 1..];
-                // Find the closing quote
-                if let Some(quote_end) = value_start.find('"') {
-                    let hash = &value_start[..quote_end];
-                    return Ok(hash.to_string());
-                }
-            }
-        }
-    }
-
-    Err(format!(
-        "No prebuilt library available for target '{}'. \n\
-         Supported targets: {}.\n\n\
-         Use the 'bundled' feature instead to compile from source:\n\
-         cargo build --no-default-features --features bundled",
-        target,
-        SUPPORTED_TARGETS.join(", ")
-    ))
-}
-
-/// Downloads and verifies a prebuilt library.
-///
-/// Returns the path to the downloaded library, or an error message.
-fn download_prebuilt() -> Result<PathBuf, String> {
-    let target = std::env::var("TARGET").map_err(|_| "TARGET environment variable not set")?;
-
-    // Check if target is in the supported list
-    if !SUPPORTED_TARGETS.contains(&target.as_str()) {
-        return Err(format!(
-            "Target '{}' is not supported for prebuilt binaries.\n\
-             Supported targets: {}.\n\n\
-             Use the 'bundled' feature instead to compile from source:\n\
-             cargo build --no-default-features --features bundled",
-            target,
-            SUPPORTED_TARGETS.join(", ")
-        ));
-    }
-
-    let cache_dir = get_cache_dir();
-    std::fs::create_dir_all(&cache_dir)
-        .map_err(|e| format!("Failed to create cache directory: {}", e))?;
-
-    let lib_name = get_prebuilt_lib_name(&target);
-    let lib_path = cache_dir.join(&lib_name);
-
-    // Fetch the expected hash from the manifest
-    let expected_hash = fetch_prebuilt_sha256(&target)?;
-
-    // Check if we already have a valid cached prebuilt
-    if lib_path.exists() {
-        match verify_sha256(&lib_path, &expected_hash) {
-            Ok(HashVerification::Match) => {
-                println!(
-                    "cargo:warning=Using cached prebuilt library: {}",
-                    lib_path.display()
-                );
-                return Ok(lib_path);
-            }
-            _ => {
-                // Hash mismatch or error, re-download
-                let _ = std::fs::remove_file(&lib_path);
-            }
-        }
-    }
-
-    // Download the prebuilt library
-    let url = get_prebuilt_url(&target);
-    println!(
-        "cargo:warning=Downloading prebuilt Verovio library from: {}",
-        url
-    );
-
-    download_file(&url, &lib_path)?;
-
-    // Verify the hash
-    match verify_sha256(&lib_path, &expected_hash) {
-        Ok(HashVerification::Match) => {
-            println!("cargo:warning=Prebuilt library verified successfully");
-            Ok(lib_path)
-        }
-        Ok(HashVerification::Mismatch { actual }) => {
-            let _ = std::fs::remove_file(&lib_path);
-            Err(format!(
-                "SHA256 hash mismatch for prebuilt library.\n\
-                 Expected: {}\n\
-                 Actual:   {}\n\n\
-                 The prebuilt binary may be corrupted or tampered with.\n\
-                 Try again or use --features bundled to compile from source.",
-                expected_hash, actual
-            ))
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&lib_path);
-            Err(format!("Failed to verify prebuilt library: {}", e))
-        }
-    }
-}
 
 /// Returns the path to the Verovio cache directory.
 ///
@@ -284,8 +52,7 @@ fn get_cache_dir() -> PathBuf {
 }
 
 /// Returns the path to the cached static library.
-fn get_cached_library_path() -> PathBuf {
-    let cache_dir = get_cached_library_dir();
+fn get_cached_library_path(cache_dir: &Path) -> PathBuf {
     if cfg!(target_os = "windows") && cfg!(target_env = "msvc") {
         cache_dir.join("verovio.lib")
     } else {
@@ -295,19 +62,15 @@ fn get_cached_library_path() -> PathBuf {
 
 /// Returns the content-addressed directory for the bundled native library.
 ///
-/// The build script contains Clef's source overlay for the pinned Verovio
-/// release, so hashing it prevents an archive compiled with an older overlay
-/// from bypassing a later source fix. The target triple prevents incompatible
-/// archives from sharing one cache entry.
-fn get_cached_library_dir() -> PathBuf {
+/// Hashing the build script and verified source inputs prevents an archive
+/// compiled from earlier inputs from bypassing a later source fix. The target
+/// triple prevents incompatible archives from sharing one cache entry.
+fn get_cached_library_dir(source: &Path) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(VEROVIO_VERSION.as_bytes());
     hasher.update(include_bytes!("build.rs"));
-    if let Ok(source) = std::env::var("VEROVIO_SOURCE_DIR") {
-        let root = PathBuf::from(source);
-        for directory in ["include", "src", "libmei", "tools"] {
-            hash_source_tree(&root, &root.join(directory), &mut hasher);
-        }
+    for directory in ["include", "src", "libmei", "tools"] {
+        hash_source_tree(source, &source.join(directory), &mut hasher);
     }
     let fingerprint = format!("{:x}", hasher.finalize());
     let target = std::env::var("TARGET").unwrap_or_else(|_| "unknown-target".to_owned());
@@ -324,10 +87,9 @@ fn hash_source_tree(root: &std::path::Path, path: &std::path::Path, hash: &mut S
     for path in entries {
         if path.is_dir() {
             hash_source_tree(root, &path, hash);
-        } else if path
-            .extension()
-            .is_some_and(|extension| matches!(extension.to_str(), Some("h" | "hpp" | "cpp" | "c")))
-            && path.file_name().is_none_or(|name| name != "git_commit.h")
+        } else if path.extension().is_some_and(|extension| {
+            matches!(extension.to_str(), Some("h" | "hpp" | "cpp" | "cc" | "c"))
+        }) && path.file_name().is_none_or(|name| name != "git_commit.h")
         {
             println!("cargo:rerun-if-changed={}", path.display());
             hash.update(
@@ -342,17 +104,12 @@ fn hash_source_tree(root: &std::path::Path, path: &std::path::Path, hash: &mut S
     }
 }
 
-/// Returns the path to the cached Verovio source directory.
-fn get_cached_source_dir() -> PathBuf {
-    get_cache_dir().join("verovio-source")
-}
-
 /// Checks if a cached Verovio library exists and should be used.
 ///
 /// Returns `false` if:
 /// - The `force-rebuild` feature is enabled
 /// - The cached library file doesn't exist
-fn should_use_cache() -> bool {
+fn should_use_cache(cache_dir: &Path) -> bool {
     // Check for force-rebuild feature via environment variable
     // (cfg! is compile-time, but we need runtime check in build scripts)
     if std::env::var("CARGO_FEATURE_FORCE_REBUILD").is_ok() {
@@ -360,7 +117,7 @@ fn should_use_cache() -> bool {
         return false;
     }
 
-    let cached_lib = get_cached_library_path();
+    let cached_lib = get_cached_library_path(cache_dir);
     if cached_lib.exists() {
         // The cache hit is the expected steady state; logging it as a
         // cargo:warning would put noise in every downstream build.
@@ -394,11 +151,9 @@ fn emit_link_directives(search_path: &std::path::Path) {
 }
 
 /// Copies the compiled library to the cache directory.
-fn cache_compiled_library(out_dir: &std::path::Path) {
-    let cache_dir = get_cached_library_dir();
-
+fn cache_compiled_library(out_dir: &Path, cache_dir: &Path) {
     // Create cache directory if it doesn't exist
-    if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+    if let Err(e) = std::fs::create_dir_all(cache_dir) {
         println!(
             "cargo:warning=Failed to create cache directory: {}. Caching disabled.",
             e
@@ -432,420 +187,40 @@ fn cache_compiled_library(out_dir: &std::path::Path) {
     }
 }
 
-struct PatchedVerovioSources {
-    include_root: PathBuf,
-    include_vrv: PathBuf,
-    toolkit_cpp: PathBuf,
-}
-
-/// Materializes the ownership fix for the pinned Verovio release without
-/// mutating a local source checkout or the verified downloaded source cache.
-///
-/// Upstream declares `Toolkit::m_humdrumBuffer` as one process-global pointer,
-/// even though each Toolkit constructor, Humdrum load, and destructor treats it
-/// as instance-owned. Independent toolkits therefore replace and free each
-/// other's buffers. Every translation unit must see the corrected class layout,
-/// so the patched header is placed before upstream include directories and the
-/// patched implementation replaces only `src/toolkit.cpp` in the source list.
-fn prepare_patched_verovio_sources(
-    verovio_dir: &std::path::Path,
-    out_dir: &std::path::Path,
-) -> Result<PatchedVerovioSources, String> {
-    let patch_root = out_dir.join("verovio-patched-sources");
-    let include_root = patch_root.join("include");
-    let include_vrv = include_root.join("vrv");
-    let source_root = patch_root.join("src");
-    std::fs::create_dir_all(&include_vrv)
-        .and_then(|()| std::fs::create_dir_all(&source_root))
-        .map_err(|error| format!("failed to create patched Verovio source tree: {error}"))?;
-
-    let upstream_header = verovio_dir.join("include/vrv/toolkit.h");
-    let header = std::fs::read_to_string(&upstream_header)
-        .map_err(|error| format!("failed to read {}: {error}", upstream_header.display()))?;
-    if !header.contains("static char *m_humdrumBuffer") {
-        let cpp = verovio_dir.join("src/toolkit.cpp");
-        let contents = std::fs::read_to_string(&cpp).map_err(|error| error.to_string())?;
-        if !header.contains("char *m_humdrumBuffer")
-            || contents.contains("char *Toolkit::m_humdrumBuffer")
-        {
-            return Err(
-                "local Verovio sources have an unrecognized Humdrum buffer ownership contract"
-                    .into(),
-            );
-        }
-        return Ok(PatchedVerovioSources {
-            include_root: verovio_dir.join("include"),
-            include_vrv: verovio_dir.join("include/vrv"),
-            toolkit_cpp: cpp,
-        });
-    }
-    let header = replace_required_once(
-        &header,
-        "    //----------------//\n    // Static members //\n    //----------------//\n\n    static char *m_humdrumBuffer;",
-        "    /** Humdrum data owned by this toolkit instance. */\n    char *m_humdrumBuffer;",
-        &upstream_header,
-    )?;
-    let patched_header = include_vrv.join("toolkit.h");
-    std::fs::write(&patched_header, header)
-        .map_err(|error| format!("failed to write {}: {error}", patched_header.display()))?;
-
-    let upstream_cpp = verovio_dir.join("src/toolkit.cpp");
-    let cpp = std::fs::read_to_string(&upstream_cpp)
-        .map_err(|error| format!("failed to read {}: {error}", upstream_cpp.display()))?;
-    let cpp = replace_required_once(
-        &cpp,
-        "char *Toolkit::m_humdrumBuffer = NULL;\n\n",
-        "",
-        &upstream_cpp,
-    )?;
-    let toolkit_cpp = source_root.join("toolkit.cpp");
-    std::fs::write(&toolkit_cpp, cpp)
-        .map_err(|error| format!("failed to write {}: {error}", toolkit_cpp.display()))?;
-
-    Ok(PatchedVerovioSources {
-        include_root,
-        include_vrv,
-        toolkit_cpp,
-    })
-}
-
-fn replace_required_once(
-    source: &str,
-    expected: &str,
-    replacement: &str,
-    path: &std::path::Path,
-) -> Result<String, String> {
-    let matches = source.matches(expected).count();
-    if matches != 1 {
-        return Err(format!(
-            "Verovio ownership patch expected one match in {}, found {matches}; review the pinned source before updating the patch",
-            path.display()
-        ));
-    }
-
-    Ok(source.replacen(expected, replacement, 1))
-}
-
-/// Result of SHA256 verification.
-enum HashVerification {
-    /// Hash matches expected value.
-    Match,
-    /// Hash does not match; includes the actual hash for error reporting.
-    Mismatch { actual: String },
-}
-
-/// Verifies the SHA256 hash of a file matches the expected value.
-///
-/// Returns `HashVerification::Match` if the hash matches, or `HashVerification::Mismatch`
-/// with the actual hash if it doesn't (useful for error messages).
-fn verify_sha256(path: &std::path::Path, expected_hash: &str) -> Result<HashVerification, String> {
-    let data =
-        std::fs::read(path).map_err(|e| format!("Failed to read file for hashing: {}", e))?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let result = hasher.finalize();
-    let actual_hash = format!("{:x}", result);
-
-    if actual_hash == expected_hash {
-        Ok(HashVerification::Match)
-    } else {
-        Ok(HashVerification::Mismatch {
-            actual: actual_hash,
-        })
-    }
-}
-
-/// Downloads a file from a URL to a destination path.
-fn download_file(url: &str, dest: &std::path::Path) -> Result<(), String> {
-    println!("cargo:warning=Downloading Verovio source from: {}", url);
-    println!("cargo:warning=This may take a moment on first build...");
-
-    let response = ureq::get(url)
-        .call()
-        .map_err(|e| format!("Failed to download Verovio source: {}", e))?;
-
-    if response.status() != 200 {
-        return Err(format!(
-            "HTTP error downloading Verovio source: status {}",
-            response.status()
-        ));
-    }
-
-    let data = response
-        .into_body()
-        .read_to_vec()
-        .map_err(|e| format!("Failed to read download response: {}", e))?;
-
-    std::fs::write(dest, &data).map_err(|e| format!("Failed to write downloaded file: {}", e))?;
-
-    Ok(())
-}
-
-/// Extracts a gzipped tarball to a destination directory.
-fn extract_tarball(
-    tarball_path: &std::path::Path,
-    dest_dir: &std::path::Path,
-) -> Result<(), String> {
-    let file =
-        std::fs::File::open(tarball_path).map_err(|e| format!("Failed to open tarball: {}", e))?;
-
-    let gz_decoder = flate2::read::GzDecoder::new(file);
-    let mut archive = tar::Archive::new(gz_decoder);
-
-    archive
-        .unpack(dest_dir)
-        .map_err(|e| format!("Failed to extract tarball: {}", e))?;
-
-    Ok(())
-}
-
-/// Discovers the Verovio source directory using the priority order.
-///
-/// Returns the path to the Verovio source directory, or an error message.
-fn discover_verovio_source() -> Result<PathBuf, String> {
-    // Priority 1: VEROVIO_SOURCE_DIR environment variable
-    if let Ok(env_path) = std::env::var("VEROVIO_SOURCE_DIR") {
-        let path = PathBuf::from(&env_path);
-        let revision = std::process::Command::new("git")
-            .args(["-C", &env_path, "rev-parse", "HEAD"])
-            .output()
-            .map_err(|error| format!("read local Verovio revision: {error}"))?;
-        if !revision.status.success()
-            || String::from_utf8_lossy(&revision.stdout).trim() != LOCAL_FINGERING_FORK_REVISION
-        {
-            return Err(format!(
-                "local fingering build requires Verovio commit {LOCAL_FINGERING_FORK_REVISION}"
-            ));
-        }
-        if path.exists() && path.join("src").exists() {
-            println!(
-                "cargo:warning=Using Verovio source from VEROVIO_SOURCE_DIR: {}",
-                path.display()
-            );
-            return Ok(path);
-        } else {
-            return Err(format!(
-                "VEROVIO_SOURCE_DIR is set to '{}' but it doesn't appear to be a valid Verovio source directory. \
-                 Expected to find a 'src' subdirectory.",
-                env_path
-            ));
-        }
-    }
-
-    // Priority 2: Local submodule path
-    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let submodule_path = manifest_dir.join("../../verovio");
-    // Use dunce::canonicalize to avoid Windows \\?\ prefix that breaks MSVC
-    if let Ok(canonical) = dunce::canonicalize(&submodule_path) {
-        if canonical.join("src").exists() {
-            println!(
-                "cargo:warning=Using Verovio source from local submodule: {}",
-                canonical.display()
-            );
-            return Ok(canonical);
-        }
-    }
-
-    // Priority 3: Cached download
-    let cache_dir = get_cache_dir();
-    let source_cache_dir = get_cached_source_dir();
-    let extracted_dir = source_cache_dir.join(format!("verovio-version-{}", VEROVIO_VERSION));
-
-    if extracted_dir.exists() && extracted_dir.join("src").exists() {
-        println!(
-            "cargo:warning=Using cached Verovio source from: {}",
-            extracted_dir.display()
-        );
-        return Ok(extracted_dir);
-    }
-
-    // Priority 4: Download from GitHub
-    println!("cargo:warning=Verovio source not found locally, downloading from GitHub...");
-
-    // Create cache directories
-    std::fs::create_dir_all(&cache_dir)
-        .map_err(|e| format!("Failed to create cache directory: {}", e))?;
-    std::fs::create_dir_all(&source_cache_dir)
-        .map_err(|e| format!("Failed to create source cache directory: {}", e))?;
-
-    let tarball_path = source_cache_dir.join(format!("verovio-{}.tar.gz", VEROVIO_VERSION));
-    let url = get_download_url();
-
-    // Download the tarball
-    download_file(&url, &tarball_path)?;
-
-    // Verify the SHA256 hash
-    println!("cargo:warning=Verifying download integrity...");
-    match verify_sha256(&tarball_path, VEROVIO_TARBALL_SHA256) {
-        Ok(HashVerification::Match) => {
-            println!("cargo:warning=SHA256 hash verified successfully");
-        }
-        Ok(HashVerification::Mismatch { actual }) => {
-            // Remove the file that failed verification
-            let _ = std::fs::remove_file(&tarball_path);
-            return Err(format!(
-                "SHA256 hash mismatch for downloaded Verovio source.\n\n\
-                 Expected: {}\n\
-                 Actual:   {}\n\n\
-                 This could indicate:\n\
-                 1. A corrupted download - try again\n\
-                 2. The VEROVIO_TARBALL_SHA256 constant needs updating for version {}\n\
-                 3. A supply chain attack (unlikely but verify manually)\n\n\
-                 To update the hash, run:\n\
-                 curl -sL {} | shasum -a 256\n\n\
-                 Or set VEROVIO_SOURCE_DIR to use a local copy.",
-                VEROVIO_TARBALL_SHA256,
-                actual,
-                VEROVIO_VERSION,
-                get_download_url()
-            ));
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&tarball_path);
-            return Err(format!("Failed to verify download hash: {}", e));
-        }
-    }
-
-    // Extract the tarball
-    println!("cargo:warning=Extracting Verovio source...");
-    extract_tarball(&tarball_path, &source_cache_dir)?;
-
-    // Verify extraction succeeded
-    if extracted_dir.exists() && extracted_dir.join("src").exists() {
-        println!(
-            "cargo:warning=Verovio source extracted to: {}",
-            extracted_dir.display()
-        );
-        // Clean up the tarball to save space
-        let _ = std::fs::remove_file(&tarball_path);
-        Ok(extracted_dir)
-    } else {
-        Err(format!(
-            "Extraction completed but expected directory not found: {}\n\
-             Please report this issue or set VEROVIO_SOURCE_DIR to use a local copy.",
-            extracted_dir.display()
-        ))
-    }
-}
-
 fn main() {
     // Set up rerun-if-changed directives
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build_source.rs");
     println!("cargo:rerun-if-env-changed=VEROVIO_SOURCE_DIR");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     // Check which feature is enabled (use env var since cfg! is compile-time)
-    let prebuilt_enabled = std::env::var("CARGO_FEATURE_PREBUILT").is_ok();
     let bundled_enabled = std::env::var("CARGO_FEATURE_BUNDLED").is_ok();
-
-    // A prebuilt-only build must fail closed while the published archive lacks
-    // the ownership patch. If bundled is also enabled, ignore prebuilt and
-    // continue through the patched source path.
-    if prebuilt_enabled && !PREBUILT_HAS_HUMDRUM_OWNERSHIP_FIX {
-        if !bundled_enabled {
-            panic!(
-                "Verovio {VEROVIO_VERSION} prebuilt archives do not contain the required instance-owned Humdrum buffer fix; enable the bundled feature"
-            );
-        }
-        println!(
-            "cargo:warning=Verovio {VEROVIO_VERSION} prebuilt archive lacks the Humdrum ownership fix; compiling the patched bundled source"
+    if !bundled_enabled {
+        panic!(
+            "This local fingering build requires the bundled feature and the pinned Verovio source; prebuilt archives are unavailable"
         );
     }
-    // Handle a future ownership-safe prebuilt archive.
-    else if prebuilt_enabled {
-        match download_prebuilt() {
-            Ok(lib_path) => {
-                let lib_dir = lib_path.parent().expect("library path has no parent");
-                emit_link_directives(lib_dir);
-                return;
-            }
-            Err(e) => {
-                if bundled_enabled {
-                    // Fall back to bundled compilation
-                    println!(
-                        "cargo:warning=Prebuilt download failed, falling back to bundled compilation: {}",
-                        e
-                    );
-                } else {
-                    panic!(
-                        "\n\nFailed to download prebuilt Verovio library:\n\n{}\n\n\
-                         To resolve this, you can:\n\
-                         1. Use --features bundled to compile from source instead\n\
-                         2. Check your network connection\n\
-                         3. Verify the target platform is supported\n\n",
-                        e
-                    );
-                }
-            }
-        }
-    }
-
-    // Only compile when the bundled feature is enabled
-    if !bundled_enabled {
-        return;
-    }
-
-    // Check if we can use the cached library
-    if should_use_cache() {
-        let cache_dir = get_cached_library_dir();
+    let requested_source = std::env::var_os("VEROVIO_SOURCE_DIR");
+    let verovio_dir = build_source::require_pinned_source(
+        requested_source.as_deref(),
+        LOCAL_FINGERING_FORK_REVISION,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    let verovio_dir = dunce::canonicalize(verovio_dir).expect("normalize validated Verovio path");
+    println!("cargo:rerun-if-changed={}", verovio_dir.display());
+    let cache_dir = get_cached_library_dir(&verovio_dir);
+    if should_use_cache(&cache_dir) {
         emit_link_directives(&cache_dir);
         return;
     }
 
-    // --- Full compilation path ---
-
-    // Discover Verovio source directory
-    let verovio_dir = match discover_verovio_source() {
-        Ok(path) => path,
-        Err(e) => {
-            panic!(
-                "\n\nFailed to locate Verovio source:\n\n{}\n\n\
-                 To resolve this, you can:\n\
-                 1. Set VEROVIO_SOURCE_DIR environment variable to your local Verovio source\n\
-                 2. Initialize the git submodule: git submodule update --init\n\
-                 3. Ensure you have network access to download from GitHub\n\n",
-                e
-            );
-        }
-    };
-    let patched_sources = prepare_patched_verovio_sources(&verovio_dir, &out_dir)
-        .unwrap_or_else(|error| panic!("failed to apply Verovio ownership patch: {error}"));
-
-    // Set up rerun-if-changed for source files now that we have the path
-    println!(
-        "cargo:rerun-if-changed={}",
-        verovio_dir.join("tools/c_wrapper.cpp").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        verovio_dir.join("tools/c_wrapper.h").display()
-    );
-
-    // Generate git_commit.h if it doesn't exist
-    let git_commit_h = verovio_dir.join("include/vrv/git_commit.h");
-    if !git_commit_h.exists() {
-        let mut file = std::fs::File::create(&git_commit_h).expect("Failed to create git_commit.h");
-        writeln!(
-            file,
-            "////////////////////////////////////////////////////////"
-        )
-        .unwrap();
-        writeln!(
-            file,
-            "/// Git commit version file generated at compilation ///"
-        )
-        .unwrap();
-        writeln!(
-            file,
-            "////////////////////////////////////////////////////////"
-        )
-        .unwrap();
-        writeln!(file).unwrap();
-        writeln!(file, "#define GIT_COMMIT \"\"").unwrap();
-        writeln!(file).unwrap();
-    }
+    std::fs::write(
+        out_dir.join("git_commit.h"),
+        format!("#define GIT_COMMIT \"{LOCAL_FINGERING_FORK_REVISION}\"\n"),
+    )
+    .expect("write deterministic Verovio commit header");
 
     let mut build = cc::Build::new();
 
@@ -867,8 +242,7 @@ fn main() {
         "libmei/addons",
     ];
 
-    build.include(&patched_sources.include_vrv);
-    build.include(&patched_sources.include_root);
+    build.include(&out_dir);
     for dir in &include_dirs {
         build.include(verovio_dir.join(dir));
     }
@@ -920,11 +294,7 @@ fn main() {
         if path.extension().is_some_and(|ext| ext == "cpp")
             && path.file_name().is_some_and(|name| name != "main.cpp")
         {
-            if path.file_name().is_some_and(|name| name == "toolkit.cpp") {
-                sources.push(patched_sources.toolkit_cpp.clone());
-            } else {
-                sources.push(path);
-            }
+            sources.push(path);
         }
     }
 
@@ -993,7 +363,7 @@ fn main() {
     build.compile("verovio");
 
     // Cache the compiled library for future builds
-    cache_compiled_library(&out_dir);
+    cache_compiled_library(&out_dir, &cache_dir);
 
     // Emit link directives (cc::Build::compile already sets up linking,
     // but we emit them explicitly for consistency)

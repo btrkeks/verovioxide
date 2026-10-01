@@ -26,7 +26,7 @@ cargo add verovioxide-sys
 ## Local source requirement
 
 This development fork requires a clean Git checkout of Verovio commit
-`5a02114b5abf25dc938f634a0018a20f8513479b`, based on version 6.2.1. Supply it
+`4c1ef689263c509ab7bbb457046068da2bd19dda`, based on version 6.2.1. Supply it
 explicitly for every build:
 
 ```bash

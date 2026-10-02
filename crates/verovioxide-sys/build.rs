@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 mod build_source;
 
 const VEROVIO_VERSION: &str = "6.2.1";
-const LOCAL_FINGERING_FORK_REVISION: &str = "4c1ef689263c509ab7bbb457046068da2bd19dda";
+const LOCAL_FINGERING_FORK_REVISION: &str = "a667281cc7845a5f6da45ad89414494e57fbac6f";
 
 /// Returns the path to the Verovio cache directory.
 ///

@@ -23,36 +23,42 @@ cargo add verovioxide-sys
 | `prebuilt` | No | Legacy flag; this local fork still requires `bundled` |
 | `force-rebuild` | No | Force fresh compilation, bypassing cache |
 
-## Local source requirement
+## Pinned source
 
-This development fork requires a clean Git checkout of Verovio commit
-`a667281cc7845a5f6da45ad89414494e57fbac6f`, based on version 6.2.1. Supply it
-explicitly for every build:
+This fork builds Verovio commit `a667281cc7845a5f6da45ad89414494e57fbac6f`,
+based on version 6.2.1. With no override, the build downloads that exact
+commit archive from `btrkeks/verovio` and requires SHA256
+`b3719e614727b09eabc8a8bd74cc3b33b9f3d314e4fccfe42a818cd316fc81a7`.
+It caches the verified archive under `target/verovio-cache/` and extracts
+fresh source into Cargo's output directory before library cache lookup.
+A cached archive allows subsequent builds without network access. A failed
+download or checksum mismatch stops the build; there is no upstream,
+submodule, or prebuilt-library fallback.
+
+An optional local override must point to a clean Git checkout of the same
+commit:
 
 ```bash
 VEROVIO_SOURCE_DIR=/path/to/verovio-fingering-layer cargo build
 ```
 
-The build rejects a missing path, another revision, or any tracked, staged,
-untracked, or ignored changes. The old ignored `include/vrv/git_commit.h`
-may remain from earlier builds; this build always overrides it with a
-commit header in Cargo's output directory. It does not modify the source
-checkout.
-
-Validation runs before cached libraries can be used. There is no upstream,
-submodule, download, or prebuilt-library fallback. This fork is local-only
-until its source pin is published through a separate approved change.
+The override rejects a missing path, another revision, or any tracked,
+staged, untracked, or ignored changes. The old ignored
+`include/vrv/git_commit.h` may remain from earlier builds; the compiler
+uses a deterministic commit header in Cargo's output directory. The build
+does not modify the override checkout. An invalid override stops the build
+without using the downloaded archive or a cached library.
 
 ## Build caching
 
 The compiled library lives under `target/verovio-cache/`, keyed by the build
 script, source inputs, and target. Subsequent builds use that library only
-after the source checkout passes validation again.
+after verifying the archive or validating the override checkout again.
 
 To force a fresh recompilation:
 
 ```bash
-VEROVIO_SOURCE_DIR=/path/to/verovio-fingering-layer cargo build --features force-rebuild
+cargo build --features force-rebuild
 ```
 
 ## Verify the source guard

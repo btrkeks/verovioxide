@@ -1,12 +1,12 @@
 //! Build script for verovioxide-sys.
 //!
-//! This script compiles the pinned local Verovio C++ library using the `cc` crate.
+//! This script compiles the pinned Verovio C++ library using the `cc` crate.
 //!
-//! # Local build contract
+//! # Source contract
 //!
-//! This fork builds only the pinned local fingering implementation. Set
-//! `VEROVIO_SOURCE_DIR` to its clean Git checkout. Validation runs before
-//! cache lookup. No upstream source or prebuilt binary fallback is available.
+//! This fork fetches only the pinned fingering implementation from btrkeks/verovio.
+//! `VEROVIO_SOURCE_DIR` may select a clean checkout of the same commit. Validation
+//! runs before library cache lookup. No upstream or prebuilt fallback is available.
 //!
 //! # Smart Caching
 //!
@@ -26,10 +26,13 @@
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+mod build_acquire;
 mod build_source;
 
 const VEROVIO_VERSION: &str = "6.2.1";
-const LOCAL_FINGERING_FORK_REVISION: &str = "a667281cc7845a5f6da45ad89414494e57fbac6f";
+const PINNED_VEROVIO_REVISION: &str = "a667281cc7845a5f6da45ad89414494e57fbac6f";
+const FINGERING_FORK_ARCHIVE_SHA256: &str =
+    "b3719e614727b09eabc8a8bd74cc3b33b9f3d314e4fccfe42a818cd316fc81a7";
 
 /// Returns the path to the Verovio cache directory.
 ///
@@ -69,6 +72,7 @@ fn get_cached_library_dir(source: &Path) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(VEROVIO_VERSION.as_bytes());
     hasher.update(include_bytes!("build.rs"));
+    hasher.update(include_bytes!("build_acquire.rs"));
     for directory in ["include", "src", "libmei", "tools"] {
         hash_source_tree(source, &source.join(directory), &mut hasher);
     }
@@ -191,6 +195,7 @@ fn main() {
     // Set up rerun-if-changed directives
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build_source.rs");
+    println!("cargo:rerun-if-changed=build_acquire.rs");
     println!("cargo:rerun-if-env-changed=VEROVIO_SOURCE_DIR");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
@@ -199,14 +204,22 @@ fn main() {
     let bundled_enabled = std::env::var("CARGO_FEATURE_BUNDLED").is_ok();
     if !bundled_enabled {
         panic!(
-            "This local fingering build requires the bundled feature and the pinned Verovio source; prebuilt archives are unavailable"
+            "This fingering build requires the bundled feature and the pinned Verovio source; prebuilt archives are unavailable"
         );
     }
     let requested_source = std::env::var_os("VEROVIO_SOURCE_DIR");
-    let verovio_dir = build_source::require_pinned_source(
-        requested_source.as_deref(),
-        LOCAL_FINGERING_FORK_REVISION,
-    )
+    let verovio_dir = match requested_source.as_deref() {
+        Some(source) => build_source::require_pinned_source(Some(source), PINNED_VEROVIO_REVISION),
+        None => build_acquire::source_from_archive(
+            &format!(
+                "https://codeload.github.com/btrkeks/verovio/tar.gz/{PINNED_VEROVIO_REVISION}"
+            ),
+            FINGERING_FORK_ARCHIVE_SHA256,
+            &get_cache_dir().join(format!("verovio-{PINNED_VEROVIO_REVISION}.tar.gz")),
+            &out_dir.join("verovio-source"),
+            &format!("verovio-{PINNED_VEROVIO_REVISION}"),
+        ),
+    }
     .unwrap_or_else(|error| panic!("{error}"));
     let verovio_dir = dunce::canonicalize(verovio_dir).expect("normalize validated Verovio path");
     println!("cargo:rerun-if-changed={}", verovio_dir.display());
@@ -218,7 +231,7 @@ fn main() {
 
     std::fs::write(
         out_dir.join("git_commit.h"),
-        format!("#define GIT_COMMIT \"{LOCAL_FINGERING_FORK_REVISION}\"\n"),
+        format!("#define GIT_COMMIT \"{PINNED_VEROVIO_REVISION}\"\n"),
     )
     .expect("write deterministic Verovio commit header");
 

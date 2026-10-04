@@ -38,7 +38,7 @@ pub fn require_pinned_source(
     let revision = git(&source, &["rev-parse", "HEAD"])?;
     if revision.trim() != expected_revision {
         return Err(format!(
-            "local fingering build requires Verovio commit {expected_revision}, found {}",
+            "local fork build requires Verovio commit {expected_revision}, found {}",
             revision.trim()
         ));
     }
@@ -57,7 +57,7 @@ pub fn require_pinned_source(
         .collect();
     if !changes.is_empty() {
         return Err(format!(
-            "local fingering build requires a clean Verovio source tree:\n{}",
+            "local fork build requires a clean Verovio source tree:\n{}",
             changes.join("\n")
         ));
     }

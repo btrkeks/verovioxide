@@ -4,7 +4,7 @@
 //!
 //! # Source contract
 //!
-//! This fork fetches only the pinned fingering implementation from btrkeks/verovio.
+//! This fork fetches only the pinned `clef` branch commit of btrkeks/verovio.
 //! `VEROVIO_SOURCE_DIR` may select a clean checkout of the same commit. Validation
 //! runs before library cache lookup. No upstream or prebuilt fallback is available.
 //!
@@ -30,9 +30,9 @@ mod build_acquire;
 mod build_source;
 
 const VEROVIO_VERSION: &str = "6.2.1";
-const PINNED_VEROVIO_REVISION: &str = "a667281cc7845a5f6da45ad89414494e57fbac6f";
-const FINGERING_FORK_ARCHIVE_SHA256: &str =
-    "b3719e614727b09eabc8a8bd74cc3b33b9f3d314e4fccfe42a818cd316fc81a7";
+const PINNED_VEROVIO_REVISION: &str = "c3e19d9106e814cb2c79531927b27b444974c7f8";
+const PINNED_VEROVIO_ARCHIVE_SHA256: &str =
+    "cc4cd2fdaac935dcafbc668b057fade8f2aac7fab9d629e100d5b45072b7c8f8";
 
 /// Returns the path to the Verovio cache directory.
 ///
@@ -204,7 +204,7 @@ fn main() {
     let bundled_enabled = std::env::var("CARGO_FEATURE_BUNDLED").is_ok();
     if !bundled_enabled {
         panic!(
-            "This fingering build requires the bundled feature and the pinned Verovio source; prebuilt archives are unavailable"
+            "This fork build requires the bundled feature and the pinned Verovio source; prebuilt archives are unavailable"
         );
     }
     let requested_source = std::env::var_os("VEROVIO_SOURCE_DIR");
@@ -214,7 +214,7 @@ fn main() {
             &format!(
                 "https://codeload.github.com/btrkeks/verovio/tar.gz/{PINNED_VEROVIO_REVISION}"
             ),
-            FINGERING_FORK_ARCHIVE_SHA256,
+            PINNED_VEROVIO_ARCHIVE_SHA256,
             &get_cache_dir().join(format!("verovio-{PINNED_VEROVIO_REVISION}.tar.gz")),
             &out_dir.join("verovio-source"),
             &format!("verovio-{PINNED_VEROVIO_REVISION}"),

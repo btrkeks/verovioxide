@@ -25,10 +25,10 @@ cargo add verovioxide-sys
 
 ## Pinned source
 
-This fork builds Verovio commit `a667281cc7845a5f6da45ad89414494e57fbac6f`,
+This fork builds the `clef` branch of `btrkeks/verovio` at commit `c3e19d9106e814cb2c79531927b27b444974c7f8`,
 based on version 6.2.1. With no override, the build downloads that exact
 commit archive from `btrkeks/verovio` and requires SHA256
-`b3719e614727b09eabc8a8bd74cc3b33b9f3d314e4fccfe42a818cd316fc81a7`.
+`cc4cd2fdaac935dcafbc668b057fade8f2aac7fab9d629e100d5b45072b7c8f8`.
 It caches the verified archive under `target/verovio-cache/` and extracts
 fresh source into Cargo's output directory before library cache lookup.
 A cached archive allows subsequent builds without network access. A failed
@@ -39,7 +39,7 @@ An optional local override must point to a clean Git checkout of the same
 commit:
 
 ```bash
-VEROVIO_SOURCE_DIR=/path/to/verovio-fingering-layer cargo build
+VEROVIO_SOURCE_DIR=/path/to/verovio-clef cargo build
 ```
 
 The override rejects a missing path, another revision, or any tracked,

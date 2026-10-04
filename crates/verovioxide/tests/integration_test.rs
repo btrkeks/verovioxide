@@ -804,6 +804,44 @@ fn test_render_humdrum() {
     assert!(!humdrum.is_empty());
 }
 
+const HUMDRUM_TWO_REST_BARS: &str = "**kern\t**kern\n*clefF4\t*clefG2\n*M3/4\t*M3/4\n=1\t=1\n\
+    2.C\t2.c\n=2\t=2\n2.r\t2.r\n=3\t=3\n2.r\t2.r\n=4\t=4\n2.C\t2.c\n==\t==\n*-\t*-\n";
+
+fn humdrum_rest_mei(hum_multi_rest: Option<bool>) -> String {
+    let mut toolkit = Toolkit::new().expect("Failed to create toolkit");
+    let mut options = Options::builder().input_from("humdrum");
+    if let Some(group) = hum_multi_rest {
+        options = options.hum_multi_rest(group);
+    }
+    toolkit
+        .set_options(&options.build())
+        .expect("Failed to set options");
+    toolkit
+        .load_data(HUMDRUM_TWO_REST_BARS)
+        .expect("Failed to load Humdrum score");
+    toolkit.get_mei().expect("Failed to export MEI")
+}
+
+/// Humdrum import groups consecutive whole-measure rests by default.
+#[test]
+#[serial]
+fn test_humdrum_groups_whole_measure_rests_by_default() {
+    let mei = humdrum_rest_mei(None);
+
+    assert_eq!(mei.matches("<multiRest").count(), 2, "{mei}");
+    assert_eq!(mei.matches("<mRest").count(), 0, "{mei}");
+}
+
+/// `humMultiRest: false` keeps every whole-measure rest in its own measure.
+#[test]
+#[serial]
+fn test_hum_multi_rest_false_keeps_whole_measure_rests_separate() {
+    let mei = humdrum_rest_mei(Some(false));
+
+    assert_eq!(mei.matches("<multiRest").count(), 0, "{mei}");
+    assert_eq!(mei.matches("<mRest").count(), 4, "{mei}");
+}
+
 /// Live toolkit instances must retain ownership of their own Humdrum buffers.
 #[test]
 #[serial]

@@ -195,6 +195,10 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub justify_vertically: Option<bool>,
 
+    /// Whether Humdrum import groups consecutive whole-measure rests into a multi-rest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hum_multi_rest: Option<bool>,
+
     /// Condense mode for dense layouts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condense: Option<CondenseMode>,
@@ -508,6 +512,13 @@ impl OptionsBuilder {
         self
     }
 
+    /// Sets whether Humdrum import groups consecutive whole-measure rests into a multi-rest.
+    #[must_use]
+    pub fn hum_multi_rest(mut self, group: bool) -> Self {
+        self.options.hum_multi_rest = Some(group);
+        self
+    }
+
     /// Sets the condense mode for dense layouts.
     #[must_use]
     pub fn condense(mut self, mode: CondenseMode) -> Self {
@@ -777,6 +788,13 @@ mod tests {
         let options = Options::builder().justify_vertically(true).build();
         assert_eq!(options.justify_vertically, Some(true));
         assert!(options.to_json().unwrap().contains(r#""justifyVertically":true"#));
+    }
+
+    #[test]
+    fn test_options_builder_hum_multi_rest() {
+        let options = Options::builder().hum_multi_rest(false).build();
+        assert_eq!(options.hum_multi_rest, Some(false));
+        assert!(options.to_json().unwrap().contains(r#""humMultiRest":false"#));
     }
 
     #[test]

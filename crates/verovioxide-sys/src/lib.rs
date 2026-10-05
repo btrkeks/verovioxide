@@ -133,7 +133,7 @@ unsafe extern "C" {
     /// `true` if the action was successful, `false` otherwise.
     pub fn vrvToolkit_edit(tkPtr: *mut c_void, editorAction: *const c_char) -> bool;
 
-    /// Get information about the last edit operation.
+    /// Get the status of the last edit operation.
     ///
     /// # Arguments
     ///
@@ -141,9 +141,21 @@ unsafe extern "C" {
     ///
     /// # Returns
     ///
-    /// A JSON string with edit information. The pointer is valid until the next
+    /// A JSON string with the edit status. The pointer is valid until the next
     /// API call that returns a string.
-    pub fn vrvToolkit_editInfo(tkPtr: *mut c_void) -> *const c_char;
+    pub fn vrvToolkit_editStatus(tkPtr: *mut c_void) -> *const c_char;
+
+    /// Get the editor response of the last edit operation (experimental upstream).
+    ///
+    /// # Arguments
+    ///
+    /// * `tkPtr` - Pointer to the toolkit instance
+    ///
+    /// # Returns
+    ///
+    /// The editor response as a string. The pointer is valid until the next
+    /// API call that returns a string.
+    pub fn vrvToolkit_editResponse(tkPtr: *mut c_void) -> *const c_char;
 
     // =========================================================================
     // Options Functions

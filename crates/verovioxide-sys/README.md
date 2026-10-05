@@ -25,10 +25,10 @@ cargo add verovioxide-sys
 
 ## Pinned source
 
-This fork builds the `clef` branch of `btrkeks/verovio` at commit `c3e19d9106e814cb2c79531927b27b444974c7f8`,
-based on version 6.2.1. With no override, the build downloads that exact
+This fork builds the `clef` branch of `btrkeks/verovio` at commit `16d3f5d0975477ac69cdbabbbdff5a4d8d40b79a`,
+based on version 6.3.0. With no override, the build downloads that exact
 commit archive from `btrkeks/verovio` and requires SHA256
-`cc4cd2fdaac935dcafbc668b057fade8f2aac7fab9d629e100d5b45072b7c8f8`.
+`8b5bb18605f156a7d391bdb5984a9ccbc3ea80fe872ab51f7f9280c0d7397ca8`.
 It caches the verified archive under `target/verovio-cache/` and extracts
 fresh source into Cargo's output directory before library cache lookup.
 A cached archive allows subsequent builds without network access. A failed

@@ -2774,10 +2774,10 @@ impl Toolkit {
         }
     }
 
-    /// Gets information about the last edit operation.
+    /// Gets the status of the last edit operation.
     ///
-    /// Returns a JSON string containing details about the most recent edit
-    /// performed via [`edit()`](Self::edit).
+    /// Returns a JSON string describing the most recent edit performed via
+    /// [`edit()`](Self::edit). Verovio 6.3 renamed this from `editInfo`.
     ///
     /// # Example
     ///
@@ -2787,14 +2787,24 @@ impl Toolkit {
     /// let mut toolkit = Toolkit::new().expect("Failed to create toolkit");
     /// // ... load data and perform an edit ...
     ///
-    /// let info = toolkit.edit_info();
-    /// println!("Last edit info: {}", info);
+    /// let status = toolkit.edit_status();
+    /// println!("Last edit status: {}", status);
     /// ```
     #[must_use]
-    pub fn edit_info(&self) -> String {
+    pub fn edit_status(&self) -> String {
         // SAFETY: ptr is valid
-        let info_ptr = unsafe { verovioxide_sys::vrvToolkit_editInfo(self.ptr) };
-        self.ptr_to_string(info_ptr).unwrap_or_default()
+        let status_ptr = unsafe { verovioxide_sys::vrvToolkit_editStatus(self.ptr) };
+        self.ptr_to_string(status_ptr).unwrap_or_default()
+    }
+
+    /// Gets the editor response of the last edit operation.
+    ///
+    /// Verovio marks this as experimental code not to rely on.
+    #[must_use]
+    pub fn edit_response(&self) -> String {
+        // SAFETY: ptr is valid
+        let response_ptr = unsafe { verovioxide_sys::vrvToolkit_editResponse(self.ptr) };
+        self.ptr_to_string(response_ptr).unwrap_or_default()
     }
 
     /// Enables or disables logging to stderr.
@@ -3419,11 +3429,10 @@ mod tests {
     }
 
     #[test]
-    fn test_toolkit_edit_info() {
+    fn test_toolkit_edit_status_and_response() {
         let toolkit = Toolkit::without_resources().expect("Failed to create toolkit");
-        let info = toolkit.edit_info();
-        // Should return JSON (possibly empty object)
-        let _ = info;
+        let _ = toolkit.edit_status();
+        let _ = toolkit.edit_response();
     }
 
     #[test]

@@ -842,6 +842,32 @@ fn test_hum_multi_rest_false_keeps_whole_measure_rests_separate() {
     assert_eq!(mei.matches("<mRest").count(), 4, "{mei}");
 }
 
+const HUMDRUM_LINKED_SLURS: &str = "**kern\t**kern\n*clefF4\t*clefG2\n*M3/4\t*M3/4\n=1\t=1\n\
+    4C\t4cN(\n4D\t4d\n4EN)\t4e\n=2\t=2\n4F\t4fN(\n4G\t4g\n4AN)\t4a\n==\t==\n*-\t*-\n\
+    !!!RDF**kern: N = linked\n";
+
+/// `humMultiRest: false` must not drop slurs linked across staves with the
+/// RDF link signifier.
+#[test]
+#[serial]
+fn test_hum_multi_rest_false_keeps_linked_slurs() {
+    let mut toolkit = Toolkit::new().expect("Failed to create toolkit");
+    toolkit
+        .set_options(
+            &Options::builder()
+                .input_from("humdrum")
+                .hum_multi_rest(false)
+                .build(),
+        )
+        .expect("Failed to set options");
+    toolkit
+        .load_data(HUMDRUM_LINKED_SLURS)
+        .expect("Failed to load Humdrum score");
+    let mei = toolkit.get_mei().expect("Failed to export MEI");
+
+    assert_eq!(mei.matches("<slur ").count(), 2, "{mei}");
+}
+
 /// Live toolkit instances must retain ownership of their own Humdrum buffers.
 #[test]
 #[serial]

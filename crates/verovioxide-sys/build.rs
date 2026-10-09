@@ -95,7 +95,6 @@ fn hash_source_tree(root: &std::path::Path, path: &std::path::Path, hash: &mut S
             matches!(extension.to_str(), Some("h" | "hpp" | "cpp" | "cc" | "c"))
         }) && path.file_name().is_none_or(|name| name != "git_commit.h")
         {
-            println!("cargo:rerun-if-changed={}", path.display());
             hash.update(
                 path.strip_prefix(root)
                     .expect("source inside root")
@@ -222,7 +221,11 @@ fn main() {
     }
     .unwrap_or_else(|error| panic!("{error}"));
     let verovio_dir = dunce::canonicalize(verovio_dir).expect("normalize validated Verovio path");
-    println!("cargo:rerun-if-changed={}", verovio_dir.display());
+    // The archive is pinned by SHA and re-extracted on every run, so watching
+    // the extracted tree would make this script rerun forever.
+    if requested_source.is_some() {
+        println!("cargo:rerun-if-changed={}", verovio_dir.display());
+    }
     let cache_dir = get_cached_library_dir(&verovio_dir);
     if should_use_cache(&cache_dir) {
         emit_link_directives(&cache_dir);

@@ -25,35 +25,30 @@ cargo add verovioxide-sys
 
 ## Pinned source
 
-This fork builds the `clef` branch of `btrkeks/verovio` at commit `35b35a2eacee5748616349387309d314a4448d48`,
-based on version 6.3.0. With no override, the build downloads that exact
-commit archive from `btrkeks/verovio` and requires SHA256
-`a52e446bf523352e196bea427a65276220c6ba980e380b158e451ebc04024007`.
-It caches the verified archive under `target/verovio-cache/` and extracts
-fresh source into Cargo's output directory before library cache lookup.
-A cached archive allows subsequent builds without network access. A failed
-download or checksum mismatch stops the build; there is no upstream,
-submodule, or prebuilt-library fallback.
-
-An optional local override must point to a clean Git checkout of the same
-commit:
+This branch is a local-only development pin for the bounded clef importer
+repair at native commit `21d246c333a1e9dee561b9aec86ea2507d0d9ea7`.
+`build.rs` pins that exact revision.
+It requires an explicit clean Git checkout, including on a library cache hit:
 
 ```bash
-VEROVIO_SOURCE_DIR=/path/to/verovio-clef cargo build
+VEROVIO_SOURCE_DIR=/path/to/the/exact/native/commit RUSTC_WRAPPER= cargo build
 ```
 
-The override rejects a missing path, another revision, or any tracked,
-staged, untracked, or ignored changes. The old ignored
-`include/vrv/git_commit.h` may remain from earlier builds; the compiler
-uses a deterministic commit header in Cargo's output directory. The build
-does not modify the override checkout. An invalid override stops the build
-without using the downloaded archive or a cached library.
+The source guard rejects a missing path, another revision, a subdirectory,
+and tracked, staged, untracked or ignored changes. The legacy ignored
+`include/vrv/git_commit.h` is the sole exception. Compilation uses a deterministic
+commit header in Cargo's output directory and does not modify the source tree.
+Build and test outputs must stay outside that source tree.
+
+There is no archive download, archive checksum, upstream source or prebuilt
+fallback on this branch. This native commit is unpublished. A portable release
+requires a separate published pin with a verified archive checksum.
 
 ## Build caching
 
 The compiled library lives under `target/verovio-cache/`, keyed by the build
-script, source inputs, and target. Subsequent builds use that library only
-after verifying the archive or validating the override checkout again.
+script, source-guard implementation, source contents, and target. Subsequent
+builds validate the exact source checkout again before library cache lookup.
 
 To force a fresh recompilation:
 

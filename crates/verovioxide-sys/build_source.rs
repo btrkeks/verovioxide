@@ -4,8 +4,7 @@ use std::process::Command;
 
 fn git(source: &Path, arguments: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
-        .arg("-C")
-        .arg(source)
+        .current_dir(source)
         .args(arguments)
         .output()
         .map_err(|error| format!("inspect Verovio source {}: {error}", source.display()))?;
@@ -130,6 +129,23 @@ mod tests {
     fn missing_source_fails_closed() {
         let error = require_pinned_source(None, "expected").unwrap_err();
         assert!(error.contains("VEROVIO_SOURCE_DIR is required"));
+    }
+
+    #[test]
+    fn nonexistent_source_and_subdirectory_are_rejected() {
+        let checkout = Checkout::new();
+        let absent = checkout.0.join("missing");
+        assert!(
+            require_pinned_source(Some(absent.as_os_str()), &checkout.revision())
+                .unwrap_err()
+                .contains("resolve Verovio source")
+        );
+        let child = checkout.0.join("src");
+        assert!(
+            require_pinned_source(Some(child.as_os_str()), &checkout.revision())
+                .unwrap_err()
+                .contains("checkout root")
+        );
     }
 
     #[test]

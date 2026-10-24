@@ -26,7 +26,7 @@ cargo add verovioxide-sys
 ## Pinned source
 
 This branch is a local-only development pin for the bounded clef importer
-repair at native commit `a2f19019932d1c1d98c66370573eb0e5f10c2d70`.
+repair at native commit `1f1d0269e4c2004038986a0330ae9aef978fa526`.
 `build.rs` pins that exact revision.
 It requires an explicit clean Git checkout, including on a library cache hit:
 

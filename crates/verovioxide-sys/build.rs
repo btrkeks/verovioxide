@@ -4,8 +4,8 @@
 //!
 //! # Source contract
 //!
-//! This local-only fork requires `VEROVIO_SOURCE_DIR` at the pinned native commit.
-//! The checkout must be clean. Source validation
+//! This fork fetches only the pinned commit of btrkeks/verovio.
+//! `VEROVIO_SOURCE_DIR` may select a clean checkout of the same commit. Validation
 //! runs before library cache lookup. No upstream or prebuilt fallback is available.
 //!
 //! # Smart Caching
@@ -26,10 +26,13 @@
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+mod build_acquire;
 mod build_source;
 
 const VEROVIO_VERSION: &str = "6.3.0";
 const PINNED_VEROVIO_REVISION: &str = "1f1d0269e4c2004038986a0330ae9aef978fa526";
+const PINNED_VEROVIO_ARCHIVE_SHA256: &str =
+    "7d7bcbc6b025f1629cbe35d82a1ee1705650d57005900f071763c20cb6d11ea3";
 
 /// Returns the path to the Verovio cache directory.
 ///
@@ -69,6 +72,7 @@ fn get_cached_library_dir(source: &Path) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(VEROVIO_VERSION.as_bytes());
     hasher.update(include_bytes!("build.rs"));
+    hasher.update(include_bytes!("build_acquire.rs"));
     hasher.update(include_bytes!("build_source.rs"));
     for directory in ["include", "src", "libmei", "tools"] {
         hash_source_tree(source, &source.join(directory), &mut hasher);
@@ -191,6 +195,7 @@ fn main() {
     // Set up rerun-if-changed directives
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build_source.rs");
+    println!("cargo:rerun-if-changed=build_acquire.rs");
     println!("cargo:rerun-if-env-changed=VEROVIO_SOURCE_DIR");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
@@ -203,11 +208,25 @@ fn main() {
         );
     }
     let requested_source = std::env::var_os("VEROVIO_SOURCE_DIR");
-    let verovio_dir =
-        build_source::require_pinned_source(requested_source.as_deref(), PINNED_VEROVIO_REVISION)
-            .unwrap_or_else(|error| panic!("{error}"));
+    let verovio_dir = match requested_source.as_deref() {
+        Some(source) => build_source::require_pinned_source(Some(source), PINNED_VEROVIO_REVISION),
+        None => build_acquire::source_from_archive(
+            &format!(
+                "https://codeload.github.com/btrkeks/verovio/tar.gz/{PINNED_VEROVIO_REVISION}"
+            ),
+            PINNED_VEROVIO_ARCHIVE_SHA256,
+            &get_cache_dir().join(format!("verovio-{PINNED_VEROVIO_REVISION}.tar.gz")),
+            &out_dir.join("verovio-source"),
+            &format!("verovio-{PINNED_VEROVIO_REVISION}"),
+        ),
+    }
+    .unwrap_or_else(|error| panic!("{error}"));
     let verovio_dir = dunce::canonicalize(verovio_dir).expect("normalize validated Verovio path");
-    println!("cargo:rerun-if-changed={}", verovio_dir.display());
+    // The archive is pinned by SHA and re-extracted on every run, so watching
+    // the extracted tree would make this script rerun forever.
+    if requested_source.is_some() {
+        println!("cargo:rerun-if-changed={}", verovio_dir.display());
+    }
     let cache_dir = get_cached_library_dir(&verovio_dir);
     if should_use_cache(&cache_dir) {
         emit_link_directives(&cache_dir);

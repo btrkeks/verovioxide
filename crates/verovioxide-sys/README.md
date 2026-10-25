@@ -19,36 +19,37 @@ cargo add verovioxide-sys
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `bundled` | Yes | Compile the pinned local Verovio fork |
+| `bundled` | Yes | Compile the pinned Verovio fork |
 | `prebuilt` | No | Legacy flag; this local fork still requires `bundled` |
 | `force-rebuild` | No | Force fresh compilation, bypassing cache |
 
 ## Pinned source
 
-This branch is a local-only development pin for the bounded clef importer
-repair at native commit `1f1d0269e4c2004038986a0330ae9aef978fa526`.
-`build.rs` pins that exact revision.
-It requires an explicit clean Git checkout, including on a library cache hit:
+This branch downloads native commit `1f1d0269e4c2004038986a0330ae9aef978fa526`
+from `btrkeks/verovio`. Before extraction or library cache lookup, it verifies
+the archive SHA256
+`7d7bcbc6b025f1629cbe35d82a1ee1705650d57005900f071763c20cb6d11ea3`.
+The verified archive is cached for offline reuse. Extraction is refreshed on
+each build-script run. There is no upstream or prebuilt fallback.
+
+For local development, an explicit clean Git checkout of the same commit may
+replace the download, including on a library cache hit:
 
 ```bash
 VEROVIO_SOURCE_DIR=/path/to/the/exact/native/commit RUSTC_WRAPPER= cargo build
 ```
 
-The source guard rejects a missing path, another revision, a subdirectory,
-and tracked, staged, untracked or ignored changes. The legacy ignored
-`include/vrv/git_commit.h` is the sole exception. Compilation uses a deterministic
-commit header in Cargo's output directory and does not modify the source tree.
-Build and test outputs must stay outside that source tree.
-
-There is no archive download, archive checksum, upstream source or prebuilt
-fallback on this branch. This native commit is unpublished. A portable release
-requires a separate published pin with a verified archive checksum.
+The source guard rejects another revision, a subdirectory, and tracked, staged,
+untracked or ignored changes. The legacy ignored `include/vrv/git_commit.h` is
+the sole exception. Compilation uses a deterministic commit header in Cargo's
+output directory and does not modify the source tree. Build and test outputs
+must stay outside that source tree.
 
 ## Build caching
 
 The compiled library lives under `target/verovio-cache/`, keyed by the build
 script, source-guard implementation, source contents, and target. Subsequent
-builds validate the exact source checkout again before library cache lookup.
+builds verify the archive or explicit source checkout before library cache lookup.
 
 To force a fresh recompilation:
 

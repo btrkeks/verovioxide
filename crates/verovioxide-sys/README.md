@@ -25,10 +25,10 @@ cargo add verovioxide-sys
 
 ## Pinned source
 
-This branch downloads native commit `10ba5dd9a29761a4fd2bc45be61b56af7ec06549`
+This branch downloads native commit `f4a5092d9b7b0f299aa474c023abd86fa5eb92ff`
 from `btrkeks/verovio`. Before extraction or library cache lookup, it verifies
 the archive SHA256
-`63bd5b2bb695e62eb48ab97cebd90fba4a7291644b10452af97c19f9e3a226d4`.
+`88083a9ad39d0ad42c284ddf59d8d67701f2c02934393eb47c9aafc55036b531`.
 The verified archive is cached for offline reuse. Extraction is refreshed on
 each build-script run. There is no upstream or prebuilt fallback.
 

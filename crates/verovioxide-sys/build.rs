@@ -30,9 +30,9 @@ mod build_acquire;
 mod build_source;
 
 const VEROVIO_VERSION: &str = "6.4.1";
-const PINNED_VEROVIO_REVISION: &str = "10ba5dd9a29761a4fd2bc45be61b56af7ec06549";
+const PINNED_VEROVIO_REVISION: &str = "f4a5092d9b7b0f299aa474c023abd86fa5eb92ff";
 const PINNED_VEROVIO_ARCHIVE_SHA256: &str =
-    "63bd5b2bb695e62eb48ab97cebd90fba4a7291644b10452af97c19f9e3a226d4";
+    "88083a9ad39d0ad42c284ddf59d8d67701f2c02934393eb47c9aafc55036b531";
 
 /// Returns the path to the Verovio cache directory.
 ///
